@@ -6,9 +6,11 @@ Guidance for Claude Code (and any other AI assistant) working in this repository
 
 **Agentry** is an autonomous grocery-ordering agent, submitted to the [Agents for Humans Hackathon](https://agentsforhumans.devpost.com/) (AWS × Strands Agents SDK), **Everyday Agents** track. Deadline: **Sep 14, 2026, 5:00pm PDT**.
 
-It takes a goal ("restock the pantry") and autonomously plans the order, drives a real quick-commerce storefront via browser automation, settles payment, and only interrupts the user (via Telegram) when a real decision is needed.
+It takes a goal ("restock the pantry") and autonomously plans the order, drives a real quick-commerce storefront via browser automation, pays using the storefront's own platform wallet (e.g. Zepto Cash), and only interrupts the user (via Telegram) when a real decision is needed.
 
-This is a **port**, not a from-scratch build: the product concept, the Playwright automation approach, and the x402 payment integration come from a pre-existing project (previously named Zepto402, then Pantry, now renamed **Agentry** for this submission). The agent orchestration layer is being rebuilt from scratch on the **Strands Agents SDK** for this hackathon. See the README's Disclosure section — this distinction matters for hackathon rules compliance, so don't blur it in commit messages or docs (e.g. don't describe the whole project as "built from scratch").
+This is a **port**, not a from-scratch build: the product concept and the Playwright automation approach come from a pre-existing project (previously named Zepto402, then Pantry, now renamed **Agentry** for this submission). The agent orchestration layer is being rebuilt from scratch on the **Strands Agents SDK** for this hackathon. See the README's Disclosure section — this distinction matters for hackathon rules compliance, so don't blur it in commit messages or docs (e.g. don't describe the whole project as "built from scratch").
+
+Payment is platform-cash checkout only (Zepto Cash or equivalent) — there is no x402/blockchain payment integration in this project, by design. Don't reintroduce x402, wallet keys, or on-chain settlement without the user explicitly asking for it.
 
 ## Hackathon constraints — do not violate these
 
@@ -25,7 +27,7 @@ This is a **port**, not a from-scratch build: the product concept, the Playwrigh
 | Agent framework | Strands Agents SDK (Python) |
 | Model | Gemini via Strands' `GeminiModel` (default); Bedrock Claude/Nova is a possible stretch swap |
 | Browser automation | Playwright (stealth) |
-| Payments | x402 / HTTP 402 |
+| Payments | Platform-native wallet balance at checkout (e.g. Zepto Cash) — no x402/blockchain |
 | Notifications | Telegram Bot API |
 | (Stretch) Deployment | Bedrock AgentCore Runtime |
 
@@ -48,7 +50,7 @@ playwright install --with-deps chromium
 python main.py --goal "restock the pantry"
 ```
 
-There is no test suite yet — if you add one, prefer testing tool functions in isolation (mock the Playwright/x402/Telegram calls) over trying to test full agent runs, since those are slow and non-deterministic.
+There is no test suite yet — if you add one, prefer testing tool functions in isolation (mock the Playwright/Telegram calls) over trying to test full agent runs, since those are slow and non-deterministic.
 
 ## Git workflow
 
@@ -64,7 +66,7 @@ Commit periodically, not in one large end-of-project dump. This repo's commit hi
 
 - **Model swap risk**: if switching from Gemini to Bedrock, expect to re-tune the planning prompt — Bedrock models (Claude/Nova) don't necessarily respond to the same prompt structure Gemini does. Don't assume a drop-in swap works without a fresh end-to-end test.
 - **Playwright stealth flags**: storefront automation is fragile to selector/DOM changes on the live site; if a run fails, check for site changes before assuming the agent logic broke.
-- **x402 test vs. real funds**: make sure whichever wallet/network config is active in `.env` is the one you intend — don't run against real payment rails while testing.
+- **Platform wallet balance**: `browser_automation` pays from whatever platform wallet balance (e.g. Zepto Cash) is available at checkout — make sure the storefront account used for testing has a balance you're actually willing to spend.
 - **AgentCore is optional** — don't burn remaining time on it before the core submission checklist (README, license, video, text description, repo public) is done.
 
 ## Reference links

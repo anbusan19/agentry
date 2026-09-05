@@ -16,7 +16,7 @@ Agentry takes a goal — *"restock the pantry"* or a specific shopping list — 
 
 1. **Plans** the order from the goal (what's needed, in what quantity)
 2. **Shops** by driving a real quick-commerce storefront directly (search, cart, substitutions)
-3. **Pays** via an autonomous payment flow at checkout
+3. **Pays** using the storefront's own wallet balance at checkout (e.g. Zepto Cash)
 4. **Only interrupts you** when there's a real decision to make — an item is out of stock, a price has jumped, a substitution needs your call — via Telegram
 
 It's not a chatbot you have to manage. It runs in the background and reports back.
@@ -37,8 +37,7 @@ User goal ("restock the pantry")
         v
    Strands Agent  <----->  Model provider (Gemini, via Strands' GeminiModel)
         |
-        |-- @tool: browser_automation  --> live storefront (search, cart, checkout)
-        |-- @tool: process_payment     --> x402 payment settlement
+        |-- @tool: browser_automation  --> live storefront (search, cart, checkout, platform-wallet payment)
         |-- @tool: notify_user         --> Telegram (confirmations / decisions needed)
         |
         v
@@ -55,7 +54,7 @@ User goal ("restock the pantry")
 | Agent framework | [Strands Agents SDK](https://strandsagents.com/) |
 | Model | Google Gemini (via Strands' `GeminiModel` provider) — Bedrock (Claude/Nova) as a stretch swap |
 | Storefront automation | Playwright (stealth browser automation) |
-| Payments | x402 / HTTP 402 payment protocol |
+| Payments | Platform-native wallet balance at checkout (e.g. Zepto Cash) |
 | Notifications | Telegram Bot API |
 | (Stretch) Deployment | Amazon Bedrock AgentCore Runtime |
 
@@ -75,7 +74,7 @@ User goal ("restock the pantry")
 - Python 3.10+
 - A Gemini API key
 - A Telegram bot token (for notifications)
-- Wallet/payment credentials configured for the x402 flow
+- A storefront account with a funded platform wallet (e.g. Zepto Cash) to pay from
 
 ### Installation
 
@@ -100,7 +99,7 @@ Create a `.env` file in the project root (never commit this — see `.gitignore`
 GEMINI_API_KEY=your_gemini_api_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
-X402_WALLET_KEY=your_wallet_key
+ZEPTO_PHONE=your_registered_phone_number
 ```
 
 ### Running locally
@@ -109,7 +108,7 @@ X402_WALLET_KEY=your_wallet_key
 python main.py --goal "restock the pantry"
 ```
 
-Agentry will plan the order, run the checkout flow against the storefront, settle payment, and send a Telegram message when it's done — or sooner, if it needs a decision from you.
+Agentry will plan the order, run the checkout flow against the storefront, pay from the platform wallet balance (e.g. Zepto Cash), and send a Telegram message when it's done — or sooner, if it needs a decision from you.
 
 ---
 
@@ -121,8 +120,7 @@ agentry/
 │   ├── agent.py          # Strands Agent definition + model config
 │   └── prompts.py        # System prompt / planning instructions
 ├── tools/
-│   ├── browser.py        # Playwright storefront automation tool
-│   ├── payment.py        # x402 payment tool
+│   ├── browser.py        # Playwright storefront automation + platform-wallet checkout
 │   └── notify.py         # Telegram notification tool
 ├── main.py               # Entry point
 ├── requirements.txt
