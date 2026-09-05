@@ -18,7 +18,9 @@ from agent.prompts import SYSTEM_PROMPT
 from tools.add_to_cart import add_to_cart
 from tools.check_wallet_balance import check_wallet_balance
 from tools.checkout import checkout
+from tools.get_restock_suggestions import get_restock_suggestions
 from tools.notify import notify_user
+from tools.record_purchase import record_purchase
 from tools.search_products import search_products
 from tools.view_cart import view_cart
 
@@ -40,11 +42,13 @@ def build_agent() -> Agent:
         model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=[
+            get_restock_suggestions,
             search_products,
             add_to_cart,
             view_cart,
             check_wallet_balance,
             checkout,
+            record_purchase,
             notify_user,
         ],
     )

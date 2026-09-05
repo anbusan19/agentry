@@ -37,12 +37,14 @@ User goal ("restock the pantry")
         v
    Strands Agent  <----->  Model provider (Gemini, via Strands' GeminiModel)
         |
-        |-- @tool: search_products       --> look up items without committing to a purchase
-        |-- @tool: add_to_cart           --> add a found item to the cart
-        |-- @tool: view_cart             --> read back cart contents + total
-        |-- @tool: check_wallet_balance  --> read platform wallet balance (e.g. Zepto Cash)
-        |-- @tool: checkout              --> pay + place the order (confirm=True required)
-        |-- @tool: notify_user           --> Telegram (confirmations / decisions needed)
+        |-- @tool: get_restock_suggestions --> what's likely due, from past purchases
+        |-- @tool: search_products         --> look up items without committing to a purchase
+        |-- @tool: add_to_cart             --> add a found item to the cart
+        |-- @tool: view_cart               --> read back cart contents + total
+        |-- @tool: check_wallet_balance    --> read platform wallet balance (e.g. Zepto Cash)
+        |-- @tool: checkout                --> pay + place the order (confirm=True required)
+        |-- @tool: record_purchase         --> log a completed order for next time
+        |-- @tool: notify_user             --> Telegram (confirmations / decisions needed)
         |
         v
    Completed order + a message in your pocket
@@ -59,6 +61,7 @@ User goal ("restock the pantry")
 | Model | Google Gemini (via Strands' `GeminiModel` provider) — Bedrock (Claude/Nova) as a stretch swap |
 | Storefront automation | Playwright (stealth browser automation) |
 | Payments | Platform-native wallet balance at checkout (e.g. Zepto Cash) |
+| Purchase memory | A small NetworkX knowledge graph (restock timing + co-purchase patterns) |
 | Notifications | Telegram Bot API |
 | (Stretch) Deployment | Amazon Bedrock AgentCore Runtime |
 
@@ -140,12 +143,16 @@ agentry/
 │   └── prompts.py             # System prompt / planning instructions
 ├── tools/
 │   ├── _session.py            # Shared Playwright session (not a tool itself)
+│   ├── get_restock_suggestions.py  # What's likely due, from past purchases
 │   ├── search_products.py     # Look up products without buying
 │   ├── add_to_cart.py         # Add a found product to the cart
 │   ├── view_cart.py           # Read back cart contents + total
 │   ├── check_wallet_balance.py# Read platform wallet balance before paying
 │   ├── checkout.py            # Pay + place the order (confirm=True required)
+│   ├── record_purchase.py     # Log a completed order for next time
 │   └── notify.py              # Telegram notification tool
+├── knowledge/
+│   └── graph.py                # Purchase-history knowledge graph (NetworkX)
 ├── scripts/
 │   └── capture_session.py     # One-time interactive storefront login
 ├── main.py                    # Entry point
