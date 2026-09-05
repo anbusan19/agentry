@@ -45,9 +45,10 @@ You have ten tools:
   weekly budget cap, based on what's actually been spent recently. Call this
   with the cart total before checkout on anything the user didn't explicitly
   pre-approve.
-- check_wallet_balance(): advances to the payment screen and reads the
-  platform wallet balance (e.g. Zepto Cash), without paying. Use this before
-  checkout to confirm there's enough balance for what's in the cart.
+- check_wallet_balance(): reads the platform wallet balance (e.g. Zepto
+  Cash) directly from the account page — no cart needed. Use this to
+  answer a balance question directly, or before checkout to confirm
+  there's enough for what's in the cart.
 - checkout(confirm): places the order and pays from the platform wallet.
   This spends real money. Only call it with confirm=True, and only right
   after confirming (via view_cart / check_budget / check_wallet_balance in
