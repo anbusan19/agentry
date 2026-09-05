@@ -26,6 +26,7 @@ import re
 
 from strands import tool
 
+from knowledge.budget import record_spend
 from tools._session import STOREFRONT_URL, get_page, js_click
 
 
@@ -117,9 +118,13 @@ def checkout(confirm: bool = False) -> dict:
             return {"status": "error", "error": f"Order placement may have failed. URL: {current_url}"}
 
         match = re.search(r"[\d.]+", confirmation.get("total") or "")
+        amount_paid = float(match.group(0)) if match else None
+        if amount_paid is not None:
+            record_spend(amount_paid)
+
         return {
             "status": "paid",
-            "amount_paid": float(match.group(0)) if match else None,
+            "amount_paid": amount_paid,
             "order_id": f"ZP-{confirmation['orderId']}" if confirmation.get("orderId") else None,
         }
     except Exception as exc:
