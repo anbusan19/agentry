@@ -16,11 +16,13 @@ from strands.models.gemini import GeminiModel
 
 from agent.prompts import SYSTEM_PROMPT
 from tools.add_to_cart import add_to_cart
+from tools.check_budget import check_budget
 from tools.check_wallet_balance import check_wallet_balance
 from tools.checkout import checkout
 from tools.get_restock_suggestions import get_restock_suggestions
 from tools.notify import notify_user
 from tools.record_purchase import record_purchase
+from tools.remove_from_cart import remove_from_cart
 from tools.search_products import search_products
 from tools.view_cart import view_cart
 
@@ -45,7 +47,9 @@ def build_agent() -> Agent:
             get_restock_suggestions,
             search_products,
             add_to_cart,
+            remove_from_cart,
             view_cart,
+            check_budget,
             check_wallet_balance,
             checkout,
             record_purchase,
