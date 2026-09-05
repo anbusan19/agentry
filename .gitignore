@@ -1,0 +1,27 @@
+# Reference boilerplate (has its own .git — not part of this repo's history)
+meta/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Browser automation
+tools/.sessions/
+*.png
+
+# Agent execution logs (may contain order/PII data)
+agent_log.json
+
+# Node leftovers (in case tooling touches this dir)
+node_modules/
+dist/
+.next/
