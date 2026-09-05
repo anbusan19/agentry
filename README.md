@@ -37,8 +37,12 @@ User goal ("restock the pantry")
         v
    Strands Agent  <----->  Model provider (Gemini, via Strands' GeminiModel)
         |
-        |-- @tool: browser_automation  --> live storefront (search, cart, checkout, platform-wallet payment)
-        |-- @tool: notify_user         --> Telegram (confirmations / decisions needed)
+        |-- @tool: search_products       --> look up items without committing to a purchase
+        |-- @tool: add_to_cart           --> add a found item to the cart
+        |-- @tool: view_cart             --> read back cart contents + total
+        |-- @tool: check_wallet_balance  --> read platform wallet balance (e.g. Zepto Cash)
+        |-- @tool: checkout              --> pay + place the order (confirm=True required)
+        |-- @tool: notify_user           --> Telegram (confirmations / decisions needed)
         |
         v
    Completed order + a message in your pocket
@@ -99,8 +103,23 @@ Create a `.env` file in the project root (never commit this — see `.gitignore`
 GEMINI_API_KEY=your_gemini_api_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
-ZEPTO_PHONE=your_registered_phone_number
 ```
+
+### Log in to the storefront (once)
+
+The storefront tools reuse a saved browser profile rather than automating phone/OTP login. Run this once and log in manually in the window that opens:
+
+```bash
+python scripts/capture_session.py
+```
+
+It opens a real (visible) browser window and waits. Once you're logged in, signal it from another terminal:
+
+```bash
+touch /tmp/agentry_capture_done
+```
+
+The session is saved to `tools/.sessions/` (gitignored) and every tool call reuses it from then on.
 
 ### Running locally
 
@@ -108,7 +127,7 @@ ZEPTO_PHONE=your_registered_phone_number
 python main.py --goal "restock the pantry"
 ```
 
-Agentry will plan the order, run the checkout flow against the storefront, pay from the platform wallet balance (e.g. Zepto Cash), and send a Telegram message when it's done — or sooner, if it needs a decision from you.
+Agentry will plan the order, search and add items to the cart, pay from the platform wallet balance (e.g. Zepto Cash), and send a Telegram message when it's done — or sooner, if it needs a decision from you.
 
 ---
 
@@ -117,12 +136,19 @@ Agentry will plan the order, run the checkout flow against the storefront, pay f
 ```
 agentry/
 ├── agent/
-│   ├── agent.py          # Strands Agent definition + model config
-│   └── prompts.py        # System prompt / planning instructions
+│   ├── agent.py               # Strands Agent definition + model config
+│   └── prompts.py             # System prompt / planning instructions
 ├── tools/
-│   ├── browser.py        # Playwright storefront automation + platform-wallet checkout
-│   └── notify.py         # Telegram notification tool
-├── main.py               # Entry point
+│   ├── _session.py            # Shared Playwright session (not a tool itself)
+│   ├── search_products.py     # Look up products without buying
+│   ├── add_to_cart.py         # Add a found product to the cart
+│   ├── view_cart.py           # Read back cart contents + total
+│   ├── check_wallet_balance.py# Read platform wallet balance before paying
+│   ├── checkout.py            # Pay + place the order (confirm=True required)
+│   └── notify.py              # Telegram notification tool
+├── scripts/
+│   └── capture_session.py     # One-time interactive storefront login
+├── main.py                    # Entry point
 ├── requirements.txt
 ├── .env.example
 ├── LICENSE

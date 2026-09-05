@@ -66,7 +66,8 @@ Commit periodically, not in one large end-of-project dump. This repo's commit hi
 
 - **Model swap risk**: if switching from Gemini to Bedrock, expect to re-tune the planning prompt — Bedrock models (Claude/Nova) don't necessarily respond to the same prompt structure Gemini does. Don't assume a drop-in swap works without a fresh end-to-end test.
 - **Playwright stealth flags**: storefront automation is fragile to selector/DOM changes on the live site; if a run fails, check for site changes before assuming the agent logic broke.
-- **Platform wallet balance**: `browser_automation` pays from whatever platform wallet balance (e.g. Zepto Cash) is available at checkout — make sure the storefront account used for testing has a balance you're actually willing to spend.
+- **Platform wallet balance**: `checkout` pays from whatever platform wallet balance (e.g. Zepto Cash) is available — it requires `confirm=True` and should only ever be called that way with a clear reason. Make sure the storefront account used for testing has a balance you're actually willing to spend, and never pass `confirm=True` speculatively while testing.
+- **Storefront login is manual, not automated**: there's no phone/OTP flow in code — run `python scripts/capture_session.py` once, log in in the browser window it opens, then signal it with `touch /tmp/agentry_capture_done`. The session lives in `tools/.sessions/` (gitignored).
 - **AgentCore is optional** — don't burn remaining time on it before the core submission checklist (README, license, video, text description, repo public) is done.
 
 ## Reference links
