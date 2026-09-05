@@ -6,7 +6,6 @@
   --paper-dim: #c9c7bb;
   --petal: #f6dde2;
   --line: rgba(242, 239, 230, 0.14);
-  --maxw: 1180px;
   --gutter: clamp(24px, 5vw, 72px);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
@@ -39,9 +38,9 @@ a {
   color: inherit;
 }
 
+/* full-bleed like the hero: gutters only, no centred column */
 .wrap {
-  max-width: var(--maxw);
-  margin: 0 auto;
+  width: 100%;
   padding: 0 var(--gutter);
 }
 
@@ -248,9 +247,9 @@ h1 {
 }
 
 /* ---------- sections ----------
-   One rhythm for every block below the hero: the --maxw container with the
-   hero's own --gutter, a Geist Mono kicker, an Instrument Serif title, a
-   serif intro. */
+   One rhythm for every block below the hero: full-bleed .wrap with the hero's
+   own --gutter, a Geist Mono kicker, an Instrument Serif title, a serif
+   intro. */
 
 .section {
   padding: clamp(88px, 13vh, 168px) 0;
@@ -433,6 +432,7 @@ h1 {
 
 .stack__desc {
   align-self: center;
+  max-width: 62ch;
   color: var(--paper-dim);
 }
 
