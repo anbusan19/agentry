@@ -6,3 +6,7 @@ next-env.d.ts
 *.tsbuildinfo
 .env*.local
 .DS_Store
+
+# this project uses pnpm
+package-lock.json
+yarn.lock
