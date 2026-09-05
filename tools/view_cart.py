@@ -62,7 +62,13 @@ def view_cart() -> dict:
     page = get_page()
     try:
         page.goto(f"{STOREFRONT_URL}?cart=open", wait_until="domcontentloaded", timeout=40000)
-        page.wait_for_selector("text=Bill Summary", timeout=10000)
+        try:
+            page.wait_for_selector("text=Bill Summary", timeout=8000)
+        except Exception:
+            # An empty cart doesn't open a drawer at all — it just leaves you
+            # on the home page. Absence of "Bill Summary" means empty, not
+            # broken.
+            return {"status": "ok", "items": [], "total": "₹0", "note": "Cart is empty."}
         page.wait_for_timeout(500)
 
         sections = page.evaluate(
