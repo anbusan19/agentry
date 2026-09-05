@@ -21,6 +21,9 @@ tools/.sessions/
 # Agent execution logs (may contain order/PII data)
 agent_log.json
 
+# Purchase-history knowledge graph (real personal shopping history)
+data/
+
 # Node leftovers (in case tooling touches this dir)
 node_modules/
 dist/

@@ -10,3 +10,6 @@ requests==2.32.3
 
 # Env var loading
 python-dotenv==1.0.1
+
+# Purchase-history knowledge graph (restock timing, co-purchase patterns)
+networkx==3.4.2
