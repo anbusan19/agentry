@@ -3,11 +3,10 @@ agent/agent.py
 
 Strands Agent definition and model configuration for Agentry.
 
-This is the from-scratch Strands port for this hackathon — unlike
-tools/browser.py and tools/notify.py, there is no equivalent to adapt here,
-since the prototype this submission builds on hand-rolled its own
-orchestration loop rather than using an agent framework. See README's
-Disclosure section.
+This is the from-scratch Strands port for this hackathon — unlike most of
+tools/, there is no equivalent to adapt here, since the prototype this
+submission builds on hand-rolled its own orchestration loop rather than
+using an agent framework. See README's Disclosure section.
 """
 
 import os
@@ -16,8 +15,12 @@ from strands import Agent
 from strands.models.gemini import GeminiModel
 
 from agent.prompts import SYSTEM_PROMPT
-from tools.browser import browser_automation
+from tools.add_to_cart import add_to_cart
+from tools.check_wallet_balance import check_wallet_balance
+from tools.checkout import checkout
 from tools.notify import notify_user
+from tools.search_products import search_products
+from tools.view_cart import view_cart
 
 
 def build_agent() -> Agent:
@@ -29,12 +32,19 @@ def build_agent() -> Agent:
         )
 
     model = GeminiModel(
-        api_key=api_key,
+        client_args={"api_key": api_key},
         model_id="gemini-2.0-flash",
     )
 
     return Agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
-        tools=[browser_automation, notify_user],
+        tools=[
+            search_products,
+            add_to_cart,
+            view_cart,
+            check_wallet_balance,
+            checkout,
+            notify_user,
+        ],
     )
