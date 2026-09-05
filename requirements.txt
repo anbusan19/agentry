@@ -1,0 +1,12 @@
+# Agent framework (installed with the gemini extra — see README "Installation")
+# strands-agents[gemini]>=0.1.0
+# strands-agents-tools>=0.1.0
+
+# Browser automation
+playwright==1.47.0
+
+# Telegram notifications (plain HTTP calls to the Bot API — no framework needed)
+requests==2.32.3
+
+# Env var loading
+python-dotenv==1.0.1
