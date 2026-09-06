@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -12,8 +12,13 @@ interface Message {
   at: number;
 }
 
+// Pinned locale + hour12: toLocaleTimeString's *default* locale/format can
+// differ between the server's Node runtime and the browser (24-hour vs.
+// 12-hour, say), which is a hydration mismatch waiting to happen for any
+// timestamp rendered during the initial SSR pass. Pinning both makes the
+// output deterministic across environments.
 function timeLabel(at: number) {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
 }
 
 /**
@@ -23,17 +28,25 @@ function timeLabel(at: number) {
  * cart state carried turn to turn.
  */
 export default function ChatPanel() {
+  // `at: 0` here, not Date.now() — a timestamp baked into the initial
+  // render would embed whatever instant the server happened to render at
+  // into the SSR-ed HTML, which the client's own hydration pass has no way
+  // to reproduce exactly. Filled in for real once mounted, below.
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "agent",
       content:
         "I'm Agentry. Give me a goal, something like \"restock the pantry\" or \"what's in my cart,\" and I'll take it from there.",
-      at: Date.now(),
+      at: 0,
     },
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMessages((m) => (m.length === 1 && m[0].at === 0 ? [{ ...m[0], at: Date.now() }] : m));
+  }, []);
 
   function scrollToEnd() {
     requestAnimationFrame(() => {
