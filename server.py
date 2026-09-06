@@ -16,8 +16,9 @@ state turn to turn, the same as a CLI run would within one process.
 Run: uvicorn server:app --reload --port 8000
 """
 
+import json
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -56,15 +57,57 @@ class ChatMessage(BaseModel):
     message: str
 
 
+class ProductBatch(BaseModel):
+    query: str
+    results: list[dict]
+
+
 class ChatReply(BaseModel):
     reply: str
+    products: list[ProductBatch] = []
+
+
+def _extract_search_batches(messages: list[dict[str, Any]]) -> list[dict]:
+    """Pull out every search_products call's results from this turn's new
+    messages, so the console can render them as tiles instead of the model
+    having to retype a product list as prose. Strands records each tool
+    call as a {toolUse} block (name + input) and its outcome as a matching
+    {toolResult} block (linked by toolUseId) in the following message."""
+    tool_calls: dict[str, dict] = {}
+    batches = []
+
+    for msg in messages:
+        for block in msg.get("content", []):
+            if "toolUse" in block:
+                tu = block["toolUse"]
+                tool_calls[tu["toolUseId"]] = tu
+            elif "toolResult" in block:
+                tr = block["toolResult"]
+                call = tool_calls.get(tr.get("toolUseId"))
+                if not call or call.get("name") != "search_products" or tr.get("status") != "success":
+                    continue
+                for c in tr.get("content", []):
+                    text = c.get("text")
+                    if not text:
+                        continue
+                    try:
+                        data = json.loads(text)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if data.get("status") == "ok" and data.get("results"):
+                        batches.append(
+                            {"query": call.get("input", {}).get("query", ""), "results": data["results"]}
+                        )
+    return batches
 
 
 @app.post("/api/chat", response_model=ChatReply)
 async def chat(body: ChatMessage) -> ChatReply:
     agent = _get_agent()
+    before = len(agent.messages)
     result = await run_in_threadpool(agent, body.message)
-    return ChatReply(reply=str(result))
+    products = _extract_search_batches(agent.messages[before:])
+    return ChatReply(reply=str(result), products=products)
 
 
 @app.get("/api/graph")

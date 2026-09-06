@@ -1830,3 +1830,117 @@ h1 {
   }
 }
 
+/* ---------- product tiles ---------- */
+
+.tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  max-width: 100%;
+}
+
+.tiles__batch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiles__query {
+  font-family: var(--mono-geist);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--paper-dim);
+  padding: 0 2px;
+}
+
+.tiles__row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scroll-snap-type: x proximity;
+}
+
+.tile {
+  scroll-snap-align: start;
+  flex: 0 0 152px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  min-height: 92px;
+  background: var(--moss);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  animation: tile-in 0.22s ease both;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.tile:hover {
+  border-color: var(--paper-dim);
+  transform: translateY(-2px);
+}
+
+@keyframes tile-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+.tile__name {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--paper);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tile__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tile__price {
+  font-family: var(--mono-geist);
+  font-size: 0.82rem;
+  color: var(--petal);
+  white-space: nowrap;
+}
+
+.tile__add {
+  background: var(--paper);
+  color: var(--moss-deep);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-family: var(--mono-geist);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+
+.tile__add:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.tile__add:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    animation: none;
+  }
+}
+

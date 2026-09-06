@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import SettingsModal from "@/components/SettingsModal";
+import ProductTiles, { type ProductBatch } from "@/components/ProductTiles";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -11,6 +12,7 @@ interface Message {
   role: "user" | "agent" | "error";
   content: string;
   at: number;
+  products?: ProductBatch[];
 }
 
 // Pinned locale + hour12: toLocaleTimeString's *default* locale/format can
@@ -44,6 +46,7 @@ export default function ChatPanel() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addingUrl, setAddingUrl] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,12 +59,17 @@ export default function ChatPanel() {
     });
   }
 
-  async function send() {
-    const text = input.trim();
+  /**
+   * Sends `text` to the agent. `displayText`, if given, is what shows up
+   * in the user's own chat bubble instead — used by the product tiles'
+   * Add button, which sends a message precise enough for the model to call
+   * add_to_cart with the exact product_url, but shows the user a plain
+   * "Add X to my cart" rather than that raw detail.
+   */
+  async function send(text: string, displayText?: string) {
     if (!text || sending) return;
 
-    setMessages((m) => [...m, { role: "user", content: text, at: Date.now() }]);
-    setInput("");
+    setMessages((m) => [...m, { role: "user", content: displayText ?? text, at: Date.now() }]);
     setSending(true);
     scrollToEnd();
 
@@ -73,7 +81,10 @@ export default function ChatPanel() {
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = await res.json();
-      setMessages((m) => [...m, { role: "agent", content: data.reply, at: Date.now() }]);
+      setMessages((m) => [
+        ...m,
+        { role: "agent", content: data.reply, at: Date.now(), products: data.products },
+      ]);
     } catch (err) {
       setMessages((m) => [
         ...m,
@@ -87,8 +98,25 @@ export default function ChatPanel() {
       ]);
     } finally {
       setSending(false);
+      setAddingUrl(null);
       scrollToEnd();
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    send(text);
+  }
+
+  function handleAddTile(item: { name: string; price: string; url: string }) {
+    setAddingUrl(item.url);
+    send(
+      `Add "${item.name}" to my cart. product_url: ${item.url}`,
+      `Add ${item.name} to my cart`
+    );
   }
 
   return (
@@ -134,6 +162,9 @@ export default function ChatPanel() {
                 <p>{m.content}</p>
               )}
             </div>
+            {m.products && m.products.length > 0 && (
+              <ProductTiles batches={m.products} onAdd={handleAddTile} addingUrl={addingUrl} />
+            )}
             <span className="chat__time">{timeLabel(m.at)}</span>
           </div>
         ))}
@@ -149,13 +180,7 @@ export default function ChatPanel() {
         )}
       </div>
 
-      <form
-        className="chat__form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          send();
-        }}
-      >
+      <form className="chat__form" onSubmit={handleSubmit}>
         <input
           className="chat__input"
           value={input}
