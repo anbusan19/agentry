@@ -13,3 +13,8 @@ python-dotenv==1.0.1
 
 # Purchase-history knowledge graph (restock timing, co-purchase patterns)
 networkx==3.4.2
+
+# Web console bridge (server.py) — bridges the chat UI in web/ to a live
+# Agent instance; not part of the core CLI path (main.py)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
