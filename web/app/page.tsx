@@ -1,3 +1,4 @@
+import { ArchitectureDiagram } from "@/components/ArchitectureDiagram";
 import { Scene } from "@/components/SylvaScene";
 
 const STEPS = [
@@ -44,6 +45,8 @@ export default function Home() {
           <a href="#how">How it works</a>
           <a href="#different">Approach</a>
           <a href="#stack">Stack</a>
+          <a href="#architecture">Architecture</a>
+          <a href="/console">Console</a>
           <a className="hero__nav-cta" href="https://github.com/anbusan19/agentry">
             GitHub
           </a>
@@ -123,9 +126,22 @@ export default function Home() {
         </div>
       </section>
 
+      <section className="section" id="architecture">
+        <div className="wrap">
+          <p className="kicker">03 &middot; Architecture</p>
+          <h2 className="section__title">One agent, a handful of tools</h2>
+          <p className="section__intro">
+            A goal enters as plain text. The Strands agent plans it, then works a
+            real storefront through its tools &mdash; surfacing on Telegram only when a
+            person has to decide.
+          </p>
+          <ArchitectureDiagram />
+        </div>
+      </section>
+
       <section className="section" id="stack">
         <div className="wrap">
-          <p className="kicker">03 &middot; Stack</p>
+          <p className="kicker">04 &middot; Stack</p>
           <h2 className="section__title">What it&rsquo;s made of</h2>
           <ul className="stack">
             {STACK.map(([name, desc]) => (
