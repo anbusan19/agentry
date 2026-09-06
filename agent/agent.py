@@ -37,7 +37,9 @@ def build_agent() -> Agent:
 
     model = GeminiModel(
         client_args={"api_key": api_key},
-        model_id="gemini-2.0-flash",
+        # gemini-2.0-flash was deprecated (confirmed live, mid-build) — the
+        # API's own 404 pointed at this as the replacement.
+        model_id="gemini-3.6-flash",
     )
 
     return Agent(
