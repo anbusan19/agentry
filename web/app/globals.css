@@ -1284,6 +1284,63 @@ h1 {
   color: var(--petal);
 }
 
+/* mic-permission gate — shown in place of the mic until access is granted */
+.voice__gate-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(88px, 13vh, 108px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px dashed rgba(246, 221, 226, 0.4);
+  color: var(--paper-dim);
+}
+
+.voice__grant {
+  margin-top: 22px;
+  padding: 11px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--petal);
+  background: rgba(246, 221, 226, 0.14);
+  color: var(--paper);
+  font-family: var(--mono-geist);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.voice__grant:hover:not(:disabled) {
+  background: rgba(246, 221, 226, 0.24);
+  transform: translateY(-1px);
+}
+
+.voice__grant:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.voice__end {
+  margin-top: 22px;
+  padding: 11px 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(246, 221, 226, 0.5);
+  background: transparent;
+  color: var(--paper);
+  font-family: var(--mono-geist);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.voice__end:hover {
+  background: rgba(246, 221, 226, 0.14);
+  border-color: var(--petal);
+}
+
 .voice__mic {
   position: relative;
   display: flex;
@@ -1316,6 +1373,26 @@ h1 {
   cursor: progress;
   border-color: rgba(246, 221, 226, 0.3);
   animation: voice-mic-breathe 1.4s var(--ease) infinite;
+}
+
+.voice__mic.is-replay {
+  border-color: var(--petal);
+  background: rgba(246, 221, 226, 0.14);
+  color: var(--petal);
+}
+
+.voice__mic.is-speaking {
+  border-color: var(--petal);
+  color: var(--petal);
+  animation: voice-mic-breathe 2s var(--ease) infinite;
+}
+
+/* during a call the circle is a status light, not a button */
+.voice__mic:disabled.is-listening,
+.voice__mic:disabled.is-speaking,
+.voice__mic:disabled.is-busy {
+  opacity: 1;
+  cursor: default;
 }
 
 .voice__mic:disabled {

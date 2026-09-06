@@ -15,15 +15,35 @@ export interface VoiceExchange {
   checkout?: CheckoutInfo | null;
 }
 
-type Phase = "idle" | "recording" | "thinking" | "speaking" | "error";
+// Hands-free call tuning. RMS is 0..1 over the analyser's time-domain frame.
+const SPEECH_ON = 0.025; // cross this -> you're talking
+const SPEECH_OFF = 0.018; // fall below this -> maybe done (hysteresis)
+const SILENCE_MS = 950; // quiet for this long after speech -> send the turn
+const MIN_SPEECH_MS = 350; // ignore coughs / clicks shorter than this
+const MAX_TURN_MS = 15000; // hard cap on one utterance
+const BARGE_ON = 0.05; // louder bar to interrupt the agent while it speaks
+const BARGE_FRAMES = 4; // consecutive loud frames before we count it
+
+type Phase = "idle" | "listening" | "capturing" | "thinking" | "speaking" | "error";
+type MicPermission = "unknown" | "prompt" | "granted" | "denied";
+
+function pickMimeType(): string {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  return candidates.find((t) => window.MediaRecorder?.isTypeSupported?.(t)) ?? "";
+}
 
 /**
- * Conversational voice surface that overlays the chat panel (the voice
- * stage takes over the pane beside it). One recorded clip per turn: tap to
- * start, tap to send. It goes to server.py's /api/voice — local Whisper,
- * the shared agent, local TTS — and the spoken reply plays back here while
- * the structured result (products / cart / receipt) lands on the stage via
- * onExchange.
+ * Hands-free voice mode: a phone-call loop, not push-to-talk. One tap to
+ * start the call (which also unlocks audio playback), then a client-side
+ * energy VAD watches the mic — speech, then ~1s of quiet, sends the turn to
+ * server.py's /api/voice; the spoken reply plays automatically and the mic
+ * re-opens for the next turn. Talking over the agent interrupts it. "End
+ * call" tears it all down.
  */
 export default function VoiceMode({
   onClose,
@@ -35,40 +55,184 @@ export default function VoiceMode({
   const [phase, setPhase] = useState<Phase>("idle");
   const [caption, setCaption] = useState("");
   const [error, setError] = useState("");
+  const [mic, setMic] = useState<MicPermission>("unknown");
+  const [requesting, setRequesting] = useState(false);
+  const [replayReady, setReplayReady] = useState(false);
 
+  const streamRef = useRef<MediaStream | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number>(0);
 
-  const stopTracks = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  // Loop state the rAF tick reads/writes without re-rendering.
+  const activeRef = useRef(false);
+  const modeRef = useRef<Phase>("idle");
+  const speechStartRef = useRef(0);
+  const lastVoiceRef = useRef(0);
+  const turnStartRef = useRef(0);
+  const bargeRef = useRef(0);
+
+  const setMode = useCallback((m: Phase) => {
+    modeRef.current = m;
+    setPhase(m);
   }, []);
 
-  const cleanup = useCallback(() => {
-    try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
-    } catch {
-      /* noop */
-    }
-    audioRef.current?.pause();
-    stopTracks();
-  }, [stopTracks]);
+  // ---- permission gate -------------------------------------------------
+
+  const insecure =
+    typeof window !== "undefined" &&
+    !window.isSecureContext &&
+    !navigator.mediaDevices?.getUserMedia;
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      cleanup();
-    };
-  }, [onClose, cleanup]);
+    if (insecure) {
+      setMic("denied");
+      setError(
+        "This page isn't a secure context, so the browser won't allow microphone access. Open the console at http://localhost:3000 (not a LAN IP or .local name)."
+      );
+      return;
+    }
+    if (!navigator.permissions?.query) {
+      setMic("prompt");
+      return;
+    }
+    let status: PermissionStatus | null = null;
+    const sync = () => status && setMic(status.state as MicPermission);
+    navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((s) => {
+        status = s;
+        sync();
+        s.addEventListener("change", sync);
+      })
+      .catch(() => setMic("prompt"));
+    return () => status?.removeEventListener("change", sync);
+  }, [insecure]);
+
+  async function requestMic() {
+    if (insecure || !navigator.mediaDevices?.getUserMedia) {
+      setMic("denied");
+      setError("The browser exposes no microphone API here. Open the console at http://localhost:3000.");
+      return;
+    }
+    setRequesting(true);
+    setError("");
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+      setMic("granted");
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setError("No microphone was found. Plug one in or check your input device.");
+      } else if (name === "NotAllowedError" || name === "SecurityError") {
+        setError(
+          "Microphone access was blocked. Set Microphone to Allow for this site (the icon in the address bar), then try again."
+        );
+      } else {
+        setError((err instanceof Error && err.message) || "Could not open the microphone.");
+      }
+      setMic(name === "NotAllowedError" ? "denied" : "prompt");
+    } finally {
+      setRequesting(false);
+    }
+  }
+
+  // ---- audio playback ------------------------------------------------------
+
+  const afterReply = useCallback(() => {
+    if (activeRef.current) beginListening();
+    else setMode("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setMode]);
+
+  const playReply = useCallback(
+    (b64: string, mime: string) => {
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: mime || "audio/wav" }));
+      audioUrlRef.current = url;
+
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = afterReply;
+      audio.onerror = () => {
+        setError("The reply audio could not be played.");
+        afterReply();
+      };
+
+      setMode("speaking");
+      bargeRef.current = 0;
+      setReplayReady(false);
+      audio.play().catch(() => {
+        // Autoplay blocked (shouldn't happen after the Start-call tap) —
+        // stop the loop and let the user tap once to hear it.
+        activeRef.current = false;
+        setReplayReady(true);
+        setMode("idle");
+      });
+    },
+    [afterReply, setMode]
+  );
+
+  function replay() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    setReplayReady(false);
+    audio.play().catch(() => setReplayReady(true));
+  }
+
+  // ---- the call loop -----------------------------------------------------
+
+  function beginListening() {
+    if (!activeRef.current || !streamRef.current) return;
+    setError("");
+    chunksRef.current = [];
+    const mimeType = pickMimeType();
+    const rec = new MediaRecorder(
+      streamRef.current,
+      mimeType ? { mimeType } : undefined
+    );
+    rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
+    rec.onstop = handleTurnStop;
+    rec.start();
+    recorderRef.current = rec;
+
+    speechStartRef.current = 0;
+    lastVoiceRef.current = performance.now();
+    turnStartRef.current = performance.now();
+    setMode("listening");
+  }
+
+  function endTurn() {
+    setMode("thinking");
+    setCaption("");
+    try {
+      recorderRef.current?.stop(); // -> handleTurnStop
+    } catch {
+      beginListening();
+    }
+  }
+
+  function handleTurnStop() {
+    const rec = recorderRef.current;
+    const blob = new Blob(chunksRef.current, { type: rec?.mimeType || "audio/webm" });
+    if (!activeRef.current) return;
+    if (blob.size < 1400) {
+      beginListening(); // nothing really said
+      return;
+    }
+    upload(blob);
+  }
 
   async function upload(blob: Blob) {
-    setPhase("thinking");
+    setMode("thinking");
     setCaption("Thinking…");
     try {
       const form = new FormData();
@@ -87,82 +251,161 @@ export default function VoiceMode({
       setCaption(data.reply || "");
 
       if (data.audio_b64) {
-        const audio = new Audio(`data:${data.audio_mime || "audio/wav"};base64,${data.audio_b64}`);
-        audioRef.current = audio;
-        setPhase("speaking");
-        audio.onended = () => setPhase("idle");
-        audio.onerror = () => setPhase("idle");
-        await audio.play().catch(() => setPhase("idle"));
+        playReply(data.audio_b64, data.audio_mime || "audio/wav");
       } else {
-        setPhase("idle");
+        setError("No speech came back (TTS may not be set up — check the server log).");
+        afterReply();
       }
     } catch (err) {
       setError(
         (err instanceof Error ? err.message : "Voice request failed") +
           ". Is `uvicorn server:app --port 8000` running?"
       );
-      setPhase("error");
+      activeRef.current = false;
+      setMode("error");
     }
   }
 
-  async function startRecording() {
+  function vadTick() {
+    if (!activeRef.current) return;
+    const analyser = analyserRef.current;
+    if (analyser) {
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      const now = performance.now();
+      const mode = modeRef.current;
+
+      if (mode === "listening" || mode === "capturing") {
+        if (rms > SPEECH_ON) {
+          lastVoiceRef.current = now;
+          if (mode === "listening") {
+            speechStartRef.current = now;
+            setMode("capturing");
+          }
+        } else if (rms > SPEECH_OFF && mode === "capturing") {
+          lastVoiceRef.current = now; // still trailing off, not silence yet
+        }
+
+        if (modeRef.current === "capturing") {
+          const spoke = now - speechStartRef.current;
+          const quiet = now - lastVoiceRef.current;
+          if ((quiet > SILENCE_MS && spoke > MIN_SPEECH_MS) || now - turnStartRef.current > MAX_TURN_MS) {
+            endTurn();
+          }
+        }
+      } else if (mode === "speaking") {
+        // barge-in: talk over the agent to cut it off
+        bargeRef.current = rms > BARGE_ON ? bargeRef.current + 1 : 0;
+        if (bargeRef.current >= BARGE_FRAMES) {
+          audioRef.current?.pause();
+          bargeRef.current = 0;
+          beginListening();
+        }
+      }
+    }
+    rafRef.current = requestAnimationFrame(vadTick);
+  }
+
+  async function startCall() {
     setError("");
     setCaption("");
+    setReplayReady(false);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       streamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
-      recorder.onstop = () => {
-        stopTracks();
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        if (blob.size > 0) upload(blob);
-        else setPhase("idle");
-      };
-      recorder.start();
-      recorderRef.current = recorder;
-      setPhase("recording");
-      setCaption("Listening…");
-    } catch {
-      setError("Microphone access was blocked. Allow it in the browser and try again.");
-      setPhase("error");
+
+      const Ctx: typeof AudioContext =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      await ctx.resume();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.4;
+      source.connect(analyser);
+      ctxRef.current = ctx;
+      analyserRef.current = analyser;
+
+      setMic("granted");
+      activeRef.current = true;
+      rafRef.current = requestAnimationFrame(vadTick);
+      beginListening();
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      setMic(name === "NotAllowedError" ? "denied" : "prompt");
+      setError(
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Microphone access was blocked. Allow it for this site, then start the call again."
+          : name === "NotFoundError"
+            ? "No microphone was found."
+            : (err instanceof Error && err.message) || "Could not start the call."
+      );
+      setMode("error");
     }
   }
 
-  function stopRecording() {
+  const endCall = useCallback(() => {
+    activeRef.current = false;
+    cancelAnimationFrame(rafRef.current);
     try {
-      recorderRef.current?.stop();
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     } catch {
-      setPhase("idle");
+      /* noop */
     }
-  }
-
-  function onMicTap() {
-    if (phase === "recording") stopRecording();
-    else if (phase === "idle" || phase === "error") startRecording();
-    else if (phase === "speaking") {
-      audioRef.current?.pause();
-      setPhase("idle");
+    audioRef.current?.pause();
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
     }
-  }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    ctxRef.current?.close().catch(() => {});
+    ctxRef.current = null;
+    analyserRef.current = null;
+    setReplayReady(false);
+    setCaption("");
+    setMode("idle");
+  }, [setMode]);
 
-  const micLabel =
-    phase === "recording"
-      ? "Stop and send"
-      : phase === "speaking"
-        ? "Stop playback"
-        : "Start talking";
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      endCall();
+    };
+  }, [onClose, endCall]);
+
+  // ---- render ----------------------------------------------------------
+
+  const inCall = phase !== "idle" && phase !== "error";
+
   const status =
-    phase === "recording"
-      ? "Listening… tap to send"
-      : phase === "thinking"
-        ? "Working on it"
-        : phase === "speaking"
-          ? "Speaking"
-          : phase === "error"
-            ? "Something went wrong"
-            : "Tap to talk";
+    phase === "listening"
+      ? "Listening…"
+      : phase === "capturing"
+        ? "Go on…"
+        : phase === "thinking"
+          ? "Thinking…"
+          : phase === "speaking"
+            ? "Speaking…"
+            : phase === "error"
+              ? "Call ended on an error"
+              : replayReady
+                ? "Tap to hear the reply"
+                : "Ready when you are";
+
+  const wavesFast = phase === "capturing" || phase === "speaking";
 
   return (
     <div className="voice" role="dialog" aria-modal="true" aria-label="Voice mode">
@@ -171,7 +414,7 @@ export default function VoiceMode({
         horizonColor="#2b2e28"
         waveColor="#7f8768"
         crestColor="#f6dde2"
-        speed={phase === "recording" || phase === "speaking" ? 0.5 : 0.28}
+        speed={wavesFast ? 0.55 : 0.28}
         amplitude={2.2}
         waveScale={0.6}
         waveRatio={0.9}
@@ -193,49 +436,103 @@ export default function VoiceMode({
 
       <button className="voice__close" onClick={onClose} aria-label="Exit voice mode">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path
-            d="M3.5 3.5l9 9M12.5 3.5l-9 9"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
+          <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </button>
 
       <div className="voice__center">
         <span className="voice__eyebrow">Voice mode</span>
 
-        <button
-          className={`voice__mic ${phase === "recording" ? "is-listening" : ""} ${
-            phase === "thinking" ? "is-busy" : ""
-          }`}
-          onClick={onMicTap}
-          disabled={phase === "thinking"}
-          aria-label={micLabel}
-        >
-          <span className="voice__mic-ring" aria-hidden="true" />
-          <span className="voice__mic-ring voice__mic-ring--2" aria-hidden="true" />
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
-            <path
-              d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
-
-        <p className="voice__status">{status}</p>
-        {error ? (
-          <p className="voice__hint voice__hint--error">{error}</p>
-        ) : caption ? (
-          <p className="voice__hint">{caption}</p>
+        {mic !== "granted" && !inCall ? (
+          <>
+            <span className="voice__gate-icon" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <p className="voice__status">
+              {mic === "denied" ? "Microphone blocked" : "Microphone access needed"}
+            </p>
+            <button className="voice__grant" onClick={requestMic} disabled={requesting || insecure}>
+              {requesting
+                ? "Waiting…"
+                : insecure
+                  ? "Unavailable here"
+                  : mic === "denied" || error
+                    ? "Try again"
+                    : "Allow microphone"}
+            </button>
+            <p className={`voice__hint ${mic === "denied" || error ? "voice__hint--error" : ""}`}>
+              {error ||
+                "Agentry needs your mic for the call. Your browser will ask you to allow it."}
+            </p>
+          </>
         ) : (
-          <p className="voice__hint">
-            Talk to Agentry like you would a shopkeeper. It builds the order and shows
-            what it finds on the right.
-          </p>
+          <>
+            <button
+              className={`voice__mic ${phase === "capturing" ? "is-listening" : ""} ${
+                phase === "thinking" ? "is-busy" : ""
+              } ${phase === "speaking" ? "is-speaking" : ""} ${replayReady ? "is-replay" : ""}`}
+              onClick={
+                replayReady
+                  ? replay
+                  : !inCall
+                    ? startCall
+                    : undefined
+              }
+              disabled={inCall && !replayReady}
+              aria-label={
+                replayReady ? "Play the reply" : inCall ? "Call in progress" : "Start the call"
+              }
+            >
+              <span className="voice__mic-ring" aria-hidden="true" />
+              <span className="voice__mic-ring voice__mic-ring--2" aria-hidden="true" />
+              {replayReady ? (
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" fill="currentColor" />
+                </svg>
+              ) : (
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+                  <path
+                    d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              )}
+            </button>
+
+            <p className="voice__status">{status}</p>
+
+            {inCall ? (
+              <button className="voice__end" onClick={endCall}>
+                End call
+              </button>
+            ) : (
+              <button className="voice__grant" onClick={startCall}>
+                {replayReady ? "Start a new call" : "Start call"}
+              </button>
+            )}
+
+            {error ? (
+              <p className="voice__hint voice__hint--error">{error}</p>
+            ) : caption ? (
+              <p className="voice__hint">{caption}</p>
+            ) : (
+              <p className="voice__hint">
+                Just talk, like a phone call. Pause when you&apos;re done and Agentry answers;
+                talk over it to cut in.
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
