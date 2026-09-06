@@ -58,7 +58,7 @@ User goal ("restock the pantry")
 | Layer | Tool |
 |---|---|
 | Agent framework | [Strands Agents SDK](https://strandsagents.com/) |
-| Model | Google Gemini (via Strands' `GeminiModel` provider) — Bedrock (Claude/Nova) as a stretch swap |
+| Model | Google Gemini (via Strands' `GeminiModel` provider), default — or AWS Bedrock (`BedrockModel`, Claude/Nova) via `MODEL_PROVIDER=bedrock` |
 | Storefront automation | Playwright (stealth browser automation) |
 | Payments | Platform-native wallet balance at checkout (e.g. Zepto Cash) |
 | Purchase memory | A small NetworkX knowledge graph (restock timing + co-purchase patterns) |
@@ -103,10 +103,13 @@ playwright install --with-deps chromium
 Create a `.env` file in the project root (never commit this — see `.gitignore`):
 
 ```bash
+# Gemini is the default model provider
 GEMINI_API_KEY=your_gemini_api_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ```
+
+To use AWS Bedrock instead, set `MODEL_PROVIDER=bedrock` plus `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `BEDROCK_MODEL_ID` — see `.env.example` for the full set. You'll also need to request access to your chosen model under **AWS Console → Bedrock → Model access** in that same region before it'll actually respond.
 
 ### Log in to the storefront (once)
 

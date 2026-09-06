@@ -18,3 +18,8 @@ networkx==3.4.2
 # Agent instance; not part of the core CLI path (main.py)
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+
+# AWS Bedrock model provider (MODEL_PROVIDER=bedrock) — a stretch swap for
+# Gemini; strands-agents already depends on it transitively, pinned here
+# since agent/agent.py now imports it directly.
+boto3==1.43.89
