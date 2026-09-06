@@ -1737,9 +1737,34 @@ h1 {
 }
 
 .settings__platform-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-family: var(--font);
   font-size: 0.94rem;
   font-weight: 500;
+}
+
+.settings__platform-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-family: var(--mono-geist);
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex: none;
+}
+
+.settings__attribution {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--moss-hi);
 }
 
 .settings__badge {

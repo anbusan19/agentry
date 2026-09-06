@@ -36,6 +36,25 @@ function StatusDot({ ok }: { ok: boolean }) {
   return <span className={`settings__dot ${ok ? "settings__dot--ok" : "settings__dot--off"}`} />;
 }
 
+// Brand-colored monogram badges, not the platforms' actual logo artwork —
+// this app isn't affiliated with any of them and doesn't have rights to
+// redistribute their brand assets. Colors are just approximate nods to
+// each platform's own palette (see the attribution note in this section).
+const PLATFORM_BADGE: Record<string, { letter: string; bg: string; fg: string }> = {
+  zepto: { letter: "Z", bg: "#8929FF", fg: "#fff" },
+  blinkit: { letter: "B", bg: "#F8CB46", fg: "#1a1a1a" },
+  instamart: { letter: "S", bg: "#FC8019", fg: "#fff" },
+};
+
+function PlatformBadge({ id }: { id: string }) {
+  const meta = PLATFORM_BADGE[id] ?? { letter: id.slice(0, 1).toUpperCase(), bg: "var(--moss-hi)", fg: "#fff" };
+  return (
+    <span className="settings__platform-badge" style={{ background: meta.bg, color: meta.fg }}>
+      {meta.letter}
+    </span>
+  );
+}
+
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [section, setSection] = useState<Section>("general");
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -151,7 +170,10 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
               {settings.platforms.map((p) => (
                 <div className="settings__platform" key={p.id}>
                   <div className="settings__platform-head">
-                    <span className="settings__platform-name">{p.label}</span>
+                    <span className="settings__platform-name">
+                      <PlatformBadge id={p.id} />
+                      {p.label}
+                    </span>
                     <span className={`settings__badge ${p.supported ? "settings__badge--ok" : "settings__badge--soon"}`}>
                       {p.supported ? "Supported" : "Coming soon"}
                     </span>
@@ -168,6 +190,11 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                   )}
                 </div>
               ))}
+              <p className="settings__attribution">
+                Zepto, Blinkit, and Swiggy Instamart names and marks belong to their respective
+                owners. Agentry isn&apos;t affiliated with or endorsed by any of them — it just
+                automates the storefront you&apos;ve logged into.
+              </p>
             </section>
           )}
 
