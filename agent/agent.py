@@ -21,6 +21,7 @@ from tools.check_wallet_balance import check_wallet_balance
 from tools.checkout import checkout
 from tools.get_restock_suggestions import get_restock_suggestions
 from tools.notify import notify_user
+from tools.query_purchase_history import query_purchase_history
 from tools.record_purchase import record_purchase
 from tools.remove_from_cart import remove_from_cart
 from tools.search_products import search_products
@@ -47,6 +48,7 @@ def build_agent() -> Agent:
         system_prompt=SYSTEM_PROMPT,
         tools=[
             get_restock_suggestions,
+            query_purchase_history,
             search_products,
             add_to_cart,
             remove_from_cart,

@@ -2,8 +2,8 @@
 knowledge/graph.py
 
 A small purchase-history knowledge graph: not a tool itself, this is the
-shared logic behind tools/record_purchase.py and
-tools/get_restock_suggestions.py.
+shared logic behind tools/record_purchase.py,
+tools/get_restock_suggestions.py, and tools/query_purchase_history.py.
 
 Nodes are items (normalized by name). Each item node carries a list of past
 purchase timestamps, used to estimate a restock interval. Edges between two
@@ -117,3 +117,32 @@ def restock_suggestions(within_days: float = 3.0, now: Optional[datetime] = None
 
     due.sort(key=lambda d: d["days_since_last"] - d["usual_interval_days"], reverse=True)
     return {"due": due}
+
+
+def search_items(keyword: str) -> list[dict]:
+    """Find every item whose name contains `keyword` (case-insensitive),
+    with how many separate orders it showed up in and when it was last
+    bought. This is a plain substring match over the graph's nodes, not
+    restricted to items with a repeat pattern the way restock_suggestions
+    is — it answers "how many times have I ordered X" for anything in the
+    history, even a one-off purchase."""
+    graph = load_graph()
+    needle = _normalize(keyword)
+    if not needle:
+        return []
+
+    matches = []
+    for item, attrs in graph.nodes(data=True):
+        if needle not in item:
+            continue
+        purchases = attrs.get("purchases", [])
+        matches.append(
+            {
+                "item": item,
+                "times_ordered": len(purchases),
+                "last_purchased": max(purchases) if purchases else None,
+            }
+        )
+
+    matches.sort(key=lambda m: m["last_purchased"] or "", reverse=True)
+    return matches
