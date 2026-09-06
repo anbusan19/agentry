@@ -12,8 +12,10 @@ using an agent framework. See README's Disclosure section.
 import os
 
 from strands import Agent
+from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.models.gemini import GeminiModel
+from strands.models.model import CacheConfig
 
 from agent.prompts import SYSTEM_PROMPT
 from knowledge.settings import get_settings
@@ -31,6 +33,16 @@ from tools.view_cart import view_cart
 
 DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
+# server.py keeps one Agent alive for the whole console session, and every
+# call resends the full message history to the model — with no cap, a long
+# chat's token cost per turn grows without bound (worse here than most
+# agents, since search_products results carry names/prices/urls/images that
+# stick around in history). A sliding window keeps only the most recent
+# CONVERSATION_WINDOW_SIZE messages, truncating older tool results (first/
+# last 200 chars, images swapped for placeholders) instead of dropping them
+# outright — no extra model calls, unlike a summarizing manager.
+DEFAULT_CONVERSATION_WINDOW_SIZE = 30
+
 
 def _build_model():
     """Pick the model provider from settings (the Settings page's toggle,
@@ -44,6 +56,13 @@ def _build_model():
         return BedrockModel(
             region_name=os.environ.get("AWS_REGION", "us-east-1"),
             model_id=os.environ.get("BEDROCK_MODEL_ID", DEFAULT_BEDROCK_MODEL_ID),
+            # The system prompt and all 11 tool schemas are near-identical on
+            # every single turn — caching them (Anthropic-style, on Claude
+            # models) means Bedrock only re-processes the small part that
+            # actually changed each time, instead of billing full price for
+            # the same few thousand tokens of tools+prompt over and over.
+            cache_config=CacheConfig(strategy="auto"),
+            cache_tools="default",
         )
 
     if provider != "gemini":
@@ -64,9 +83,12 @@ def _build_model():
 
 def build_agent() -> Agent:
     """Construct the Agentry Strands Agent: model provider + tools."""
+    window_size = int(os.environ.get("CONVERSATION_WINDOW_SIZE", DEFAULT_CONVERSATION_WINDOW_SIZE))
+
     return Agent(
         model=_build_model(),
         system_prompt=SYSTEM_PROMPT,
+        conversation_manager=SlidingWindowConversationManager(window_size=window_size),
         tools=[
             get_restock_suggestions,
             query_purchase_history,
