@@ -45,6 +45,76 @@ app.add_middleware(
 
 _agent = None
 
+# Gemini models the current key can call generateContent on. Cached for the
+# process — models.list() is cheap and on a different quota than
+# generateContent, but there's no reason to re-fetch it every settings poll.
+_gemini_models_cache: Optional[list[str]] = None
+
+# Used when GEMINI_API_KEY is unset or models.list() fails (offline, quota,
+# SDK shape change) — a small hand-picked set so the composer selector is
+# never empty. The live list replaces this whenever the call succeeds.
+FALLBACK_GEMINI_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
+# models.list() also returns image / tts / transcribe / robotics / computer-use
+# variants that share the generateContent action but aren't text chat models —
+# drop anything whose id carries one of these markers.
+_NON_CHAT_MARKERS = (
+    "image",
+    "tts",
+    "transcribe",
+    "robotics",
+    "computer-use",
+    "customtools",
+    "embedding",
+    "aqa",
+)
+
+
+def _gemini_models() -> list[str]:
+    """Every Gemini model the configured key can use for chat, newest first.
+    Falls back to FALLBACK_GEMINI_MODELS on any failure so the UI selector
+    always has something to show."""
+    global _gemini_models_cache
+    if _gemini_models_cache is not None:
+        return _gemini_models_cache
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        _gemini_models_cache = FALLBACK_GEMINI_MODELS
+        return _gemini_models_cache
+
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        names: list[str] = []
+        for m in client.models.list():
+            actions = (
+                getattr(m, "supported_actions", None)
+                or getattr(m, "supported_generation_methods", None)
+                or []
+            )
+            if "generateContent" not in actions:
+                continue
+            name = (getattr(m, "name", "") or "").removeprefix("models/")
+            if not name.startswith("gemini-") or "tuning" in name:
+                continue
+            if any(marker in name for marker in _NON_CHAT_MARKERS):
+                continue
+            names.append(name)
+        _gemini_models_cache = sorted(set(names), reverse=True) or FALLBACK_GEMINI_MODELS
+    except Exception:
+        _gemini_models_cache = FALLBACK_GEMINI_MODELS
+
+    return _gemini_models_cache
+
 
 def _get_agent():
     global _agent
@@ -62,9 +132,28 @@ class ProductBatch(BaseModel):
     results: list[dict]
 
 
+class Cart(BaseModel):
+    items: list[dict]
+    total: Optional[str] = None
+
+
+class CheckoutInfo(BaseModel):
+    status: str
+    amount_paid: Optional[float] = None
+    order_id: Optional[str] = None
+    note: Optional[str] = None
+    error: Optional[str] = None
+
+
 class ChatReply(BaseModel):
     reply: str
     products: list[ProductBatch] = []
+    # Cart contents / checkout outcome for this turn, when the agent called
+    # view_cart or checkout — the console renders them as an order-summary
+    # card (in chat, and on the voice stage) instead of leaving the numbers
+    # buried in prose.
+    cart: Optional[Cart] = None
+    checkout: Optional[CheckoutInfo] = None
 
 
 def _extract_search_batches(messages: list[dict[str, Any]]) -> list[dict]:
@@ -101,13 +190,62 @@ def _extract_search_batches(messages: list[dict[str, Any]]) -> list[dict]:
     return batches
 
 
+def _last_tool_result(messages: list[dict[str, Any]], tool_name: str) -> Optional[dict]:
+    """The most recent parsed toolResult for `tool_name` in this turn's new
+    messages, or None. Same {toolUse}/{toolResult} pairing as
+    _extract_search_batches, but we only care about the last call's payload
+    (a turn that re-checks the cart should show the latest state)."""
+    calls: dict[str, dict] = {}
+    latest: Optional[dict] = None
+
+    for msg in messages:
+        for block in msg.get("content", []):
+            if "toolUse" in block:
+                tu = block["toolUse"]
+                calls[tu["toolUseId"]] = tu
+            elif "toolResult" in block:
+                tr = block["toolResult"]
+                call = calls.get(tr.get("toolUseId"))
+                if not call or call.get("name") != tool_name:
+                    continue
+                for c in tr.get("content", []):
+                    text = c.get("text")
+                    if not text:
+                        continue
+                    try:
+                        latest = json.loads(text)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+    return latest
+
+
+def _extract_cart(messages: list[dict[str, Any]]) -> Optional[dict]:
+    data = _last_tool_result(messages, "view_cart")
+    if data and data.get("status") == "ok" and data.get("items"):
+        return {"items": data["items"], "total": data.get("total")}
+    return None
+
+
+def _extract_checkout(messages: list[dict[str, Any]]) -> Optional[dict]:
+    data = _last_tool_result(messages, "checkout")
+    if not data or not data.get("status"):
+        return None
+    keep = ("status", "amount_paid", "order_id", "note", "error")
+    return {k: data[k] for k in keep if data.get(k) is not None}
+
+
 @app.post("/api/chat", response_model=ChatReply)
 async def chat(body: ChatMessage) -> ChatReply:
     agent = _get_agent()
     before = len(agent.messages)
     result = await run_in_threadpool(agent, body.message)
-    products = _extract_search_batches(agent.messages[before:])
-    return ChatReply(reply=str(result), products=products)
+    new_messages = agent.messages[before:]
+    return ChatReply(
+        reply=str(result),
+        products=_extract_search_batches(new_messages),
+        cart=_extract_cart(new_messages),
+        checkout=_extract_checkout(new_messages),
+    )
 
 
 @app.get("/api/graph")
@@ -137,6 +275,7 @@ async def graph():
 class SettingsPatch(BaseModel):
     weekly_budget_inr: Optional[float] = None
     model_provider: Optional[str] = None
+    gemini_model: Optional[str] = None
 
 
 def _settings_payload() -> dict:
@@ -146,6 +285,8 @@ def _settings_payload() -> dict:
         "weekly_budget_inr": settings["weekly_budget_inr"],
         "spent_this_week": round(spent_within(7), 2),
         "model_provider": settings["model_provider"],
+        "gemini_model": settings.get("gemini_model", "gemini-3.6-flash"),
+        "gemini_models": _gemini_models(),
         "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
         "bedrock_configured": bool(os.environ.get("AWS_ACCESS_KEY_ID")),
         "telegram_configured": bool(
@@ -165,10 +306,17 @@ async def settings():
 async def update_settings_endpoint(patch: SettingsPatch):
     global _agent
     changes = {k: v for k, v in patch.model_dump().items() if v is not None}
-    if "model_provider" in changes and changes["model_provider"] != get_settings()["model_provider"]:
+    current = get_settings()
+    provider_changed = (
+        "model_provider" in changes and changes["model_provider"] != current["model_provider"]
+    )
+    model_changed = (
+        "gemini_model" in changes and changes["gemini_model"] != current.get("gemini_model")
+    )
+    if provider_changed or model_changed:
         # The cached Agent was built with the old model — drop it so the
         # next chat request rebuilds one with whatever's now selected,
-        # instead of the toggle silently doing nothing until a restart.
+        # instead of the change silently doing nothing until a restart.
         _agent = None
     update_settings(changes)
     return _settings_payload()

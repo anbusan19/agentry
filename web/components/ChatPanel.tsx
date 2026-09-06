@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import SettingsModal from "@/components/SettingsModal";
 import ProductTiles, { type ProductBatch } from "@/components/ProductTiles";
+import PaymentCard, { type Cart, type CheckoutInfo } from "@/components/PaymentCard";
+import VoiceMode from "@/components/VoiceMode";
+import VoiceStage from "@/components/VoiceStage";
+import { DotmCircular20 } from "@/components/ui/dotm-circular-20";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -13,6 +18,14 @@ interface Message {
   content: string;
   at: number;
   products?: ProductBatch[];
+  cart?: Cart | null;
+  checkout?: CheckoutInfo | null;
+}
+
+interface ChatConfig {
+  model_provider: "gemini" | "bedrock";
+  gemini_model: string;
+  gemini_models: string[];
 }
 
 // Pinned locale + hour12: toLocaleTimeString's *default* locale/format can
@@ -30,7 +43,13 @@ function timeLabel(at: number) {
  * here can search, add to cart, and checkout exactly like a CLI run, with
  * cart state carried turn to turn.
  */
-export default function ChatPanel() {
+export default function ChatPanel({
+  onVoiceChange,
+}: {
+  /** Told whenever voice mode opens/closes, so the console can swap the
+   * right-hand pane (knowledge graph <-> voice stage). */
+  onVoiceChange?: (on: boolean) => void;
+}) {
   // `at: 0` here, not Date.now() — a timestamp baked into the initial
   // render would embed whatever instant the server happened to render at
   // into the SSR-ed HTML, which the client's own hydration pass has no way
@@ -46,12 +65,65 @@ export default function ChatPanel() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [addingUrl, setAddingUrl] = useState<string | null>(null);
+  const [config, setConfig] = useState<ChatConfig | null>(null);
+  const [modelSaving, setModelSaving] = useState(false);
+  // "Keep shopping" on the order card hides it from the voice stage without
+  // wiping it from the transcript; any new agent reply clears the flag.
+  const [stagePaymentHidden, setStagePaymentHidden] = useState(false);
+  const [stageHost, setStageHost] = useState<Element | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMessages((m) => (m.length === 1 && m[0].at === 0 ? [{ ...m[0], at: Date.now() }] : m));
   }, []);
+
+  useEffect(() => {
+    setStageHost(document.querySelector(".console__pane--graph"));
+  }, []);
+
+  useEffect(() => {
+    onVoiceChange?.(voiceOpen);
+  }, [voiceOpen, onVoiceChange]);
+
+  // The provider (gemini / bedrock) is set in Settings; the composer only
+  // reads it, plus the Gemini model list, so a per-model rate limit can be
+  // dodged by switching model right from the input row. Refetched whenever
+  // Settings closes, since the provider may have changed there.
+  const loadConfig = useCallback(() => {
+    fetch(`${API_BASE}/api/settings`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setConfig({
+          model_provider: data.model_provider,
+          gemini_model: data.gemini_model,
+          gemini_models: data.gemini_models ?? [],
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  async function changeModel(next: string) {
+    setConfig((c) => (c ? { ...c, gemini_model: next } : c));
+    setModelSaving(true);
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gemini_model: next }),
+      });
+    } catch {
+      // best-effort; the next chat call will surface a real error if it stuck
+    } finally {
+      setModelSaving(false);
+    }
+  }
 
   function scrollToEnd() {
     requestAnimationFrame(() => {
@@ -81,9 +153,17 @@ export default function ChatPanel() {
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = await res.json();
+      setStagePaymentHidden(false);
       setMessages((m) => [
         ...m,
-        { role: "agent", content: data.reply, at: Date.now(), products: data.products },
+        {
+          role: "agent",
+          content: data.reply,
+          at: Date.now(),
+          products: data.products,
+          cart: data.cart ?? null,
+          checkout: data.checkout ?? null,
+        },
       ]);
     } catch (err) {
       setMessages((m) => [
@@ -119,6 +199,22 @@ export default function ChatPanel() {
     );
   }
 
+  function handleConfirmPay() {
+    send("Yes, go ahead and place the order now.", "Place the order");
+  }
+
+  function handleCancelPay() {
+    setStagePaymentHidden(true);
+    send("Not yet — hold off on checkout for now.", "Keep shopping");
+  }
+
+  // The most recent agent turn's visuals feed the voice stage.
+  const lastAgent = [...messages].reverse().find((m) => m.role === "agent");
+  const lastAgentIndex = messages.reduce((acc, m, i) => (m.role === "agent" ? i : acc), -1);
+  const stageProducts = lastAgent?.products ?? [];
+  const stageCart = stagePaymentHidden ? null : lastAgent?.cart ?? null;
+  const stageCheckout = lastAgent?.checkout ?? null;
+
   return (
     <div className="chat">
       <div className="chat__head">
@@ -149,7 +245,29 @@ export default function ChatPanel() {
         </div>
       </div>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => {
+          setSettingsOpen(false);
+          loadConfig();
+        }}
+      />
+      {voiceOpen && <VoiceMode onClose={() => setVoiceOpen(false)} />}
+      {voiceOpen &&
+        stageHost &&
+        createPortal(
+          <VoiceStage
+            products={stageProducts}
+            cart={stageCart}
+            checkout={stageCheckout}
+            onAdd={handleAddTile}
+            addingUrl={addingUrl}
+            onConfirmPay={handleConfirmPay}
+            onCancelPay={handleCancelPay}
+            paying={sending}
+          />,
+          stageHost
+        )}
 
       <div className="chat__list" ref={listRef}>
         {messages.map((m, i) => (
@@ -165,33 +283,114 @@ export default function ChatPanel() {
             {m.products && m.products.length > 0 && (
               <ProductTiles batches={m.products} onAdd={handleAddTile} addingUrl={addingUrl} />
             )}
+            {(m.cart || m.checkout) && (
+              <PaymentCard
+                cart={m.cart}
+                checkout={m.checkout}
+                onConfirm={
+                  i === lastAgentIndex && m.cart && !m.checkout && !sending
+                    ? handleConfirmPay
+                    : undefined
+                }
+                onCancel={
+                  i === lastAgentIndex && m.cart && !m.checkout && !sending
+                    ? handleCancelPay
+                    : undefined
+                }
+                busy={sending}
+                variant="chat"
+              />
+            )}
             <span className="chat__time">{timeLabel(m.at)}</span>
           </div>
         ))}
 
         {sending && (
-          <div className="chat__row chat__row--agent">
-            <span className="chat__who">Agentry</span>
-            <div className="chat__bubble chat__bubble--thinking">
-              <span className="chat__orb" aria-hidden="true" />
-              <span className="chat__thinking-label">thinking</span>
-            </div>
+          <div className="chat__thinking" aria-live="polite" aria-label="Agentry is thinking">
+            <DotmCircular20 size={26} dotSize={3} />
           </div>
         )}
       </div>
 
-      <form className="chat__form" onSubmit={handleSubmit}>
-        <input
-          className="chat__input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="restock the pantry"
-          disabled={sending}
-        />
-        <button className="chat__send" type="submit" disabled={sending || !input.trim()}>
-          Send
-        </button>
-      </form>
+      {!sending && (
+        <form className="chat__composer" onSubmit={handleSubmit}>
+          <input
+            className="chat__composer-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="restock the pantry"
+          />
+          <div className="chat__composer-bar">
+            {config?.model_provider === "gemini" ? (
+              <label className="chat__model" title="Gemini model — switch if one is rate-limited">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path
+                    d="M6 1.2l1.4 3 3.4.4-2.5 2.3.7 3.3L6 9.8 3 11.5l.7-3.3L1.2 5.6l3.4-.4L6 1.2z"
+                    stroke="currentColor"
+                    strokeWidth="1"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <select
+                  value={config.gemini_model}
+                  onChange={(e) => changeModel(e.target.value)}
+                  disabled={modelSaving}
+                  aria-label="Gemini model"
+                >
+                  {(config.gemini_models.includes(config.gemini_model)
+                    ? config.gemini_models
+                    : [config.gemini_model, ...config.gemini_models]
+                  ).map((m) => (
+                    <option key={m} value={m}>
+                      {m.replace(/^gemini-/, "")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <span className="chat__model chat__model--static" title="Change provider in Settings">
+                {config?.model_provider === "bedrock" ? "AWS Bedrock" : "model"}
+              </span>
+            )}
+
+            <div className="chat__composer-actions">
+              <button
+                type="button"
+                className="chat__voice-btn"
+                onClick={() => setVoiceOpen(true)}
+                aria-label="Open voice mode"
+                title="Voice mode"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
+                  <path
+                    d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                className="chat__submit"
+                type="submit"
+                disabled={!input.trim()}
+                aria-label="Send message"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

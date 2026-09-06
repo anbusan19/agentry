@@ -22,6 +22,10 @@ def _defaults() -> dict:
     return {
         "weekly_budget_inr": float(os.environ.get("WEEKLY_BUDGET_INR", 1500.0)),
         "model_provider": os.environ.get("MODEL_PROVIDER", "gemini").lower(),
+        # Which Gemini model the agent talks to. Selectable from the console
+        # composer (server.py lists what the key can reach) so a per-model
+        # rate limit can be side-stepped by switching, no restart needed.
+        "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
     }
 
 

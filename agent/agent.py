@@ -73,11 +73,15 @@ def _build_model():
         raise RuntimeError(
             "GEMINI_API_KEY is not set — copy .env.example to .env and fill it in."
         )
+    # Model id comes from settings (the console composer's selector, seeded
+    # from GEMINI_MODEL, default gemini-3.6-flash). gemini-2.0-flash was
+    # deprecated mid-build — the API's own 404 pointed at 3.6 as the
+    # replacement — but the free tier caps requests per-model per-day, so
+    # being able to switch without a restart matters.
+    model_id = get_settings().get("gemini_model") or "gemini-3.6-flash"
     return GeminiModel(
         client_args={"api_key": api_key},
-        # gemini-2.0-flash was deprecated (confirmed live, mid-build) — the
-        # API's own 404 pointed at this as the replacement.
-        model_id="gemini-3.6-flash",
+        model_id=model_id,
     )
 
 

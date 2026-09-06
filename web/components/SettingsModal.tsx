@@ -16,6 +16,7 @@ interface Settings {
   weekly_budget_inr: number;
   spent_this_week: number;
   model_provider: "gemini" | "bedrock";
+  gemini_model?: string;
   gemini_configured: boolean;
   bedrock_configured: boolean;
   telegram_configured: boolean;
@@ -24,7 +25,7 @@ interface Settings {
 }
 
 const MODEL_LABEL: Record<string, string> = {
-  gemini: "Gemini 3.6 Flash",
+  gemini: "Gemini",
   bedrock: "AWS Bedrock",
 };
 
@@ -43,21 +44,29 @@ function StatusDot({ ok }: { ok: boolean }) {
   return <span className={`settings__dot ${ok ? "settings__dot--ok" : "settings__dot--off"}`} />;
 }
 
-// Brand-colored monogram badges, not the platforms' actual logo artwork —
-// this app isn't affiliated with any of them and doesn't have rights to
-// redistribute their brand assets. Colors are just approximate nods to
-// each platform's own palette (see the attribution note in this section).
-const PLATFORM_BADGE: Record<string, { letter: string; bg: string; fg: string }> = {
-  zepto: { letter: "Z", bg: "#8929FF", fg: "#fff" },
-  blinkit: { letter: "B", bg: "#F8CB46", fg: "#1a1a1a" },
-  instamart: { letter: "S", bg: "#FC8019", fg: "#fff" },
+// Platform logo artwork lives in web/public/. Names and marks belong to their
+// respective owners (see the attribution note in the Storefronts section);
+// Agentry isn't affiliated with any of them. Unknown platforms fall back to a
+// neutral monogram.
+const PLATFORM_LOGO: Record<string, string> = {
+  zepto: "/zepto.png",
+  blinkit: "/blinkit.png",
+  instamart: "/instamart.png",
 };
 
 function PlatformBadge({ id }: { id: string }) {
-  const meta = PLATFORM_BADGE[id] ?? { letter: id.slice(0, 1).toUpperCase(), bg: "var(--moss-hi)", fg: "#fff" };
+  const logo = PLATFORM_LOGO[id];
+  if (logo) {
+    return (
+      <span className="settings__platform-badge settings__platform-badge--logo">
+        {/* eslint-disable-next-line @next/next/no-img-element -- tiny local badge, no layout shift */}
+        <img src={logo} alt="" />
+      </span>
+    );
+  }
   return (
-    <span className="settings__platform-badge" style={{ background: meta.bg, color: meta.fg }}>
-      {meta.letter}
+    <span className="settings__platform-badge" style={{ background: "var(--moss-hi)", color: "#fff" }}>
+      {id.slice(0, 1).toUpperCase()}
     </span>
   );
 }
@@ -193,8 +202,18 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
               <div className="settings__row">
                 <span className="settings__row-label">Active model</span>
-                <span className="settings__row-value">{MODEL_LABEL[settings.model_provider]}</span>
+                <span className="settings__row-value">
+                  {settings.model_provider === "gemini" && settings.gemini_model
+                    ? settings.gemini_model
+                    : MODEL_LABEL[settings.model_provider]}
+                </span>
               </div>
+              {settings.model_provider === "gemini" && (
+                <p className="settings__intro">
+                  Pick which Gemini model handles chat from the selector in the message
+                  composer — handy when one model hits its daily free-tier request cap.
+                </p>
+              )}
               <div className="settings__row">
                 <span className="settings__row-label">Gemini API key</span>
                 <span className="settings__row-value">
