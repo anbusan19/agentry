@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import SettingsModal from "@/components/SettingsModal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -42,6 +43,7 @@ export default function ChatPanel() {
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -96,10 +98,30 @@ export default function ChatPanel() {
           <span className="chat__mark" aria-hidden="true" />
           <span className="chat__title">Agentry</span>
         </div>
-        <span className={`chat__status ${sending ? "chat__status--busy" : ""}`}>
-          {sending ? "working" : "idle"}
-        </span>
+        <div className="chat__head-actions">
+          <span className={`chat__status ${sending ? "chat__status--busy" : ""}`}>
+            {sending ? "working" : "idle"}
+          </span>
+          <button
+            className="chat__settings-btn"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Open settings"
+            title="Settings"
+          >
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+              <circle cx="7.5" cy="7.5" r="2.2" stroke="currentColor" strokeWidth="1.2" />
+              <path
+                d="M7.5 1.5v1.4M7.5 12.1v1.4M13.5 7.5h-1.4M2.9 7.5H1.5M11.5 3.5l-1 1M4.5 10.5l-1 1M11.5 11.5l-1-1M4.5 4.5l-1-1"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <div className="chat__list" ref={listRef}>
         {messages.map((m, i) => (
