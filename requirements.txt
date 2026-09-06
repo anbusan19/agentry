@@ -23,3 +23,15 @@ uvicorn[standard]==0.34.0
 # Gemini; strands-agents already depends on it transitively, pinned here
 # since agent/agent.py now imports it directly.
 boto3==1.43.89
+
+# ── Voice mode (optional — server.py POST /api/voice, the console mic) ──────
+# Multipart form parsing for the uploaded audio clip (FastAPI UploadFile).
+python-multipart==0.0.32
+# Local speech-to-text. Downloads the model (~140MB for "base") on first
+# use; bundles PyAV, which ships its own ffmpeg, so no system ffmpeg needed.
+faster-whisper==1.1.0
+# Text-to-speech is pluggable via VOICE_TTS and needs nothing extra by
+# default (falls back to macOS `say` / espeak). For a natural voice install
+# one of:
+#   piper — download the `piper` binary + a .onnx voice, set PIPER_VOICE
+#   coqui — pip install "TTS==0.22.0"   (large; loads slowly)

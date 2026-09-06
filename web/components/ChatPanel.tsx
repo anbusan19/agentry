@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 import SettingsModal from "@/components/SettingsModal";
 import ProductTiles, { type ProductBatch } from "@/components/ProductTiles";
 import PaymentCard, { type Cart, type CheckoutInfo } from "@/components/PaymentCard";
-import VoiceMode from "@/components/VoiceMode";
+import VoiceMode, { type VoiceExchange } from "@/components/VoiceMode";
 import VoiceStage from "@/components/VoiceStage";
 import { DotmCircular20 } from "@/components/ui/dotm-circular-20";
 
@@ -199,6 +199,28 @@ export default function ChatPanel({
     );
   }
 
+  // A completed voice turn: /api/voice already ran the agent, so just fold
+  // the transcript + reply into the same message list the text chat uses —
+  // the voice stage reads the latest agent turn from here.
+  function handleVoiceExchange(x: VoiceExchange) {
+    setStagePaymentHidden(false);
+    setMessages((m) => [
+      ...m,
+      ...(x.transcript
+        ? [{ role: "user" as const, content: x.transcript, at: Date.now() }]
+        : []),
+      {
+        role: "agent" as const,
+        content: x.reply,
+        at: Date.now(),
+        products: x.products,
+        cart: x.cart ?? null,
+        checkout: x.checkout ?? null,
+      },
+    ]);
+    scrollToEnd();
+  }
+
   function handleConfirmPay() {
     send("Yes, go ahead and place the order now.", "Place the order");
   }
@@ -252,7 +274,9 @@ export default function ChatPanel({
           loadConfig();
         }}
       />
-      {voiceOpen && <VoiceMode onClose={() => setVoiceOpen(false)} />}
+      {voiceOpen && (
+        <VoiceMode onClose={() => setVoiceOpen(false)} onExchange={handleVoiceExchange} />
+      )}
       {voiceOpen &&
         stageHost &&
         createPortal(

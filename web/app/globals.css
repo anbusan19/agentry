@@ -1312,6 +1312,26 @@ h1 {
   color: var(--petal);
 }
 
+.voice__mic.is-busy {
+  cursor: progress;
+  border-color: rgba(246, 221, 226, 0.3);
+  animation: voice-mic-breathe 1.4s var(--ease) infinite;
+}
+
+.voice__mic:disabled {
+  cursor: progress;
+}
+
+@keyframes voice-mic-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .voice__mic-ring {
   position: absolute;
   inset: -1px;
@@ -1352,7 +1372,7 @@ h1 {
 
 .voice__hint {
   margin: 0;
-  max-width: 30ch;
+  max-width: 34ch;
   font-family: var(--mono-geist);
   font-size: 0.68rem;
   line-height: 1.65;
@@ -1360,11 +1380,16 @@ h1 {
   color: var(--paper-dim);
 }
 
+.voice__hint--error {
+  color: var(--petal);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .voice {
     animation: none;
   }
-  .voice__mic.is-listening .voice__mic-ring {
+  .voice__mic.is-listening .voice__mic-ring,
+  .voice__mic.is-busy {
     animation: none;
   }
 }

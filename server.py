@@ -16,12 +16,13 @@ state turn to turn, the same as a CLI run would within one process.
 Run: uvicorn server:app --reload --port 8000
 """
 
+import base64
 import json
 import os
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -246,6 +247,73 @@ async def chat(body: ChatMessage) -> ChatReply:
         cart=_extract_cart(new_messages),
         checkout=_extract_checkout(new_messages),
     )
+
+
+class VoiceReply(BaseModel):
+    transcript: str
+    reply: str
+    products: list[ProductBatch] = []
+    cart: Optional[Cart] = None
+    checkout: Optional[CheckoutInfo] = None
+    # base64 speech audio + its mime type; null if TTS was unavailable (the
+    # text reply still stands, the console just won't speak it).
+    audio_b64: Optional[str] = None
+    audio_mime: Optional[str] = None
+
+
+@app.post("/api/voice", response_model=VoiceReply)
+async def voice(clip: UploadFile = File(...)) -> VoiceReply:
+    """One recorded mic clip -> local Whisper -> the same shared agent the
+    text console uses (so cart state carries) -> local TTS. Non-streaming by
+    design for now; the structured cart/checkout/products come back too so
+    the console's voice stage can render them."""
+    from voice.stt import transcribe
+    from voice.style import frame_transcript
+    from voice.tts import synthesize
+
+    raw = await clip.read()
+    transcript = (await run_in_threadpool(transcribe, raw, clip.content_type)).strip()
+    if not transcript:
+        return VoiceReply(transcript="", reply="Sorry, I didn't catch that. Say that again?")
+
+    agent = _get_agent()
+    before = len(agent.messages)
+    result = await run_in_threadpool(agent, frame_transcript(transcript))
+    new_messages = agent.messages[before:]
+    reply_text = str(result)
+
+    audio_b64 = audio_mime = None
+    try:
+        audio_bytes, audio_mime = await run_in_threadpool(synthesize, reply_text)
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+    except Exception as exc:  # TTS is best-effort — never fail the turn over it
+        print(f"[voice] TTS unavailable: {exc}")
+
+    return VoiceReply(
+        transcript=transcript,
+        reply=reply_text,
+        products=_extract_search_batches(new_messages),
+        cart=_extract_cart(new_messages),
+        checkout=_extract_checkout(new_messages),
+        audio_b64=audio_b64,
+        audio_mime=audio_mime,
+    )
+
+
+@app.get("/api/voice/health")
+async def voice_health():
+    """Whether the local voice loop can run, for the console to show a
+    'voice not ready' hint instead of a silent failure."""
+    from voice.stt import is_ready as stt_ready
+    from voice.tts import active_engine
+
+    tts = active_engine()
+    return {
+        "stt_ready": stt_ready(),
+        "stt_model": os.environ.get("VOICE_STT_MODEL", "base"),
+        "tts_engine": tts,
+        "ready": stt_ready() and tts != "none",
+    }
 
 
 @app.get("/api/graph")
