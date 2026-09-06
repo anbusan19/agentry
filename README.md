@@ -132,6 +132,23 @@ python main.py --goal "restock the pantry"
 
 Agentry will plan the order, search and add items to the cart, pay from the platform wallet balance (e.g. Zepto Cash), and send a Telegram message when it's done — or sooner, if it needs a decision from you.
 
+### Web console (optional)
+
+`web/` is a Next.js app with a chat window talking to a live Agent instance, and a force-directed view of the purchase-history knowledge graph next to it. It needs `server.py` running as a bridge:
+
+```bash
+# terminal 1 — the agent, exposed over HTTP
+source .venv/bin/activate
+uvicorn server:app --reload --port 8000
+
+# terminal 2 — the frontend
+cd web
+pnpm install
+pnpm dev
+```
+
+Then open `http://localhost:3000/console`. Conversation state and the browser session both live in the `uvicorn` process, so cart state carries across chat turns the same way it would across tool calls in a single `main.py` run.
+
 ---
 
 ## Project structure
@@ -146,16 +163,22 @@ agentry/
 │   ├── get_restock_suggestions.py  # What's likely due, from past purchases
 │   ├── search_products.py     # Look up products without buying
 │   ├── add_to_cart.py         # Add a found product to the cart
+│   ├── remove_from_cart.py    # Undo a mistake, or clear an item
 │   ├── view_cart.py           # Read back cart contents + total
+│   ├── check_budget.py        # Weekly spend-cap check
 │   ├── check_wallet_balance.py# Read platform wallet balance before paying
 │   ├── checkout.py            # Pay + place the order (confirm=True required)
 │   ├── record_purchase.py     # Log a completed order for next time
 │   └── notify.py              # Telegram notification tool
 ├── knowledge/
-│   └── graph.py                # Purchase-history knowledge graph (NetworkX)
+│   ├── graph.py                # Purchase-history knowledge graph (NetworkX)
+│   └── budget.py                # Local spend log + budget-cap check
 ├── scripts/
 │   └── capture_session.py     # One-time interactive storefront login
-├── main.py                    # Entry point
+├── web/                        # Next.js landing page + chat/graph console
+│   └── app/console/            # Chat window + knowledge-graph view
+├── server.py                   # FastAPI bridge: web/ console <-> live Agent
+├── main.py                    # Entry point (CLI)
 ├── requirements.txt
 ├── .env.example
 ├── LICENSE

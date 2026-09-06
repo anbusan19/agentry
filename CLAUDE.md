@@ -29,6 +29,8 @@ Payment is platform-cash checkout only (Zepto Cash or equivalent) — there is n
 | Browser automation | Playwright (stealth) |
 | Payments | Platform-native wallet balance at checkout (e.g. Zepto Cash) — no x402/blockchain |
 | Notifications | Telegram Bot API |
+| Purchase memory | A small NetworkX knowledge graph (restock timing + co-purchase patterns) |
+| Web console (optional) | Next.js (`web/`) + FastAPI bridge (`server.py`) |
 | (Stretch) Deployment | Bedrock AgentCore Runtime |
 
 ## Repo conventions
@@ -48,6 +50,10 @@ playwright install --with-deps chromium
 
 # run
 python main.py --goal "restock the pantry"
+
+# optional web console (chat + knowledge-graph view) — two terminals:
+uvicorn server:app --reload --port 8000   # agent bridge
+cd web && pnpm install && pnpm dev        # http://localhost:3000/console
 ```
 
 There is no test suite yet — if you add one, prefer testing tool functions in isolation (mock the Playwright/Telegram calls) over trying to test full agent runs, since those are slow and non-deterministic.
