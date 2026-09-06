@@ -3,15 +3,24 @@ tools/_session.py
 
 Shared Playwright session for storefront tools. Not a tool itself (no
 @tool here) — this is the plumbing every tools/*.py storefront tool imports:
-one persistent, already-logged-in browser profile and one live page, reused
-across tool calls within an agent run so cart state survives from
-search_products through checkout, exactly like a real shopping session.
+one persistent, already-logged-in browser profile and one live page per
+platform, reused across tool calls within an agent run so cart state
+survives from search_products through checkout, exactly like a real
+shopping session.
 
 Uses a persistent browser profile (Playwright's launch_persistent_context)
 rather than exporting/importing a storage-state file: logging in once via
 scripts/capture_session.py writes cookies straight to this profile directory,
 and every tool call afterwards reuses them automatically. No explicit
 save/load step needed.
+
+Multi-platform note: PLATFORMS below is the registry for Blinkit/Instamart
+expansion — session capture (login) already works for any of them, since
+that flow is just "open the URL, let the user log in, keep the profile."
+What's still Zepto-only is every tool's actual scraping logic
+(search_products.py, add_to_cart.py, etc.), which hardcodes Zepto's DOM.
+Porting those to another platform means giving each one its own selectors,
+not just pointing this file at a different URL.
 """
 
 from pathlib import Path
@@ -19,8 +28,31 @@ from typing import Optional
 
 from playwright.sync_api import Page, sync_playwright
 
-STOREFRONT_URL = "https://www.zepto.com"
-SESSION_DIR = Path(__file__).parent / ".sessions" / "zepto-profile"
+DEFAULT_PLATFORM = "zepto"
+
+PLATFORMS: dict[str, dict] = {
+    "zepto": {
+        "label": "Zepto",
+        "url": "https://www.zepto.com",
+        # Shopping tools (search/cart/checkout) are implemented for this one.
+        "supported": True,
+    },
+    "blinkit": {
+        "label": "Blinkit",
+        "url": "https://blinkit.com",
+        "supported": False,
+    },
+    "instamart": {
+        "label": "Swiggy Instamart",
+        "url": "https://www.swiggy.com/instamart",
+        "supported": False,
+    },
+}
+
+# Kept as module-level constants so the existing (Zepto-only) tool files can
+# keep importing them unchanged.
+STOREFRONT_URL = PLATFORMS[DEFAULT_PLATFORM]["url"]
+SESSION_DIR = Path(__file__).parent / ".sessions" / f"{DEFAULT_PLATFORM}-profile"
 
 USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
@@ -36,32 +68,66 @@ CONTEXT_ARGS = dict(
 )
 
 _playwright = None
-_context = None
-_page: Optional[Page] = None
+_contexts: dict[str, object] = {}
+_pages: dict[str, Page] = {}
 
 
-def get_page(headless: bool = True) -> Page:
+def session_dir(platform: str) -> Path:
+    return Path(__file__).parent / ".sessions" / f"{platform}-profile"
+
+
+def platform_status() -> list[dict]:
+    """For the settings UI: every known platform, whether a login session
+    has been captured for it, and whether shopping tools exist for it yet."""
+    status = []
+    for pid, info in PLATFORMS.items():
+        sdir = session_dir(pid)
+        connected = sdir.exists() and any(sdir.iterdir())
+        status.append(
+            {
+                "id": pid,
+                "label": info["label"],
+                "url": info["url"],
+                "supported": info["supported"],
+                "connected": connected,
+            }
+        )
+    return status
+
+
+def get_page(platform: str = DEFAULT_PLATFORM, headless: bool = True) -> Page:
     """Return the shared, already-navigated-if-possible page for this
-    process. Launches the persistent profile on first use."""
-    global _playwright, _context, _page
+    platform in this process. Launches the persistent profile on first use.
+    One context per platform, so switching platforms mid-process doesn't
+    tear down another platform's session."""
+    global _playwright
 
-    if _context is None:
-        SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        _playwright = sync_playwright().start()
-        _context = _playwright.chromium.launch_persistent_context(
-            user_data_dir=str(SESSION_DIR),
+    if platform not in PLATFORMS:
+        raise ValueError(f"Unknown platform {platform!r} — known: {list(PLATFORMS)}")
+
+    if platform not in _contexts:
+        sdir = session_dir(platform)
+        sdir.mkdir(parents=True, exist_ok=True)
+        if _playwright is None:
+            _playwright = sync_playwright().start()
+        context = _playwright.chromium.launch_persistent_context(
+            user_data_dir=str(sdir),
             headless=headless,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
             **CONTEXT_ARGS,
         )
-        _context.add_init_script(
+        context.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
         )
+        _contexts[platform] = context
 
-    if _page is None or _page.is_closed():
-        _page = _context.pages[0] if _context.pages else _context.new_page()
+    context = _contexts[platform]
+    page = _pages.get(platform)
+    if page is None or page.is_closed():
+        page = context.pages[0] if context.pages else context.new_page()
+        _pages[platform] = page
 
-    return _page
+    return page
 
 
 def is_logged_in(page: Page) -> bool:
