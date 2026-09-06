@@ -34,8 +34,11 @@ _RESULTS_JS = r"""(max) => {
             !/^\(\d+(\.\d+)?[km]?\)$/i.test(l) &&                          // review count, e.g. "(39.7k)"
             !/^\d+\.?\d*\s*(pack|pc|pcs|ml|g|kg|l|ltr|litre|liters?)\b/i.test(l)  // weight, e.g. "1 pack (1 L)"
         );
+        const img = card.querySelector('img');
+        const image = img ? (img.getAttribute('src') || '') : '';
+
         if (name && href && !results.find(r => r.url === href)) {
-            results.push({ name, price, url: href });
+            results.push({ name, price, url: href, image });
         }
         if (results.length >= max) break;
     }
@@ -56,7 +59,9 @@ def search_products(query: str, limit: int = 5) -> dict:
 
     Returns:
         A dict with status ("ok", "not_found", or "error") and, on success,
-        a "results" list of {name, price, url} dicts, best match first.
+        a "results" list of {name, price, url, image} dicts, best match
+        first. "image" is a product photo URL, or an empty string if the
+        card had none.
     """
     page = get_page()
     try:

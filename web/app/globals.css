@@ -1867,13 +1867,10 @@ h1 {
   flex: 0 0 152px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px;
-  min-height: 92px;
   background: var(--moss);
   border: 1px solid var(--line);
   border-radius: 12px;
+  overflow: hidden;
   animation: tile-in 0.22s ease both;
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
@@ -1888,6 +1885,35 @@ h1 {
     opacity: 0;
     transform: translateY(6px) scale(0.98);
   }
+}
+
+.tile__img,
+.tile__img--placeholder {
+  width: 100%;
+  height: 84px;
+  display: block;
+  object-fit: contain;
+  background: var(--paper);
+  flex: none;
+}
+
+.tile__img--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--moss-deep);
+  font-family: var(--serif);
+  font-size: 1.6rem;
+  color: var(--moss-hi);
+}
+
+.tile__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  flex: 1;
 }
 
 .tile__name {
