@@ -136,6 +136,7 @@ async def graph():
 
 class SettingsPatch(BaseModel):
     weekly_budget_inr: Optional[float] = None
+    model_provider: Optional[str] = None
 
 
 def _settings_payload() -> dict:
@@ -144,7 +145,9 @@ def _settings_payload() -> dict:
     return {
         "weekly_budget_inr": settings["weekly_budget_inr"],
         "spent_this_week": round(spent_within(7), 2),
+        "model_provider": settings["model_provider"],
         "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
+        "bedrock_configured": bool(os.environ.get("AWS_ACCESS_KEY_ID")),
         "telegram_configured": bool(
             os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
         ),
@@ -160,7 +163,14 @@ async def settings():
 
 @app.post("/api/settings")
 async def update_settings_endpoint(patch: SettingsPatch):
-    update_settings({k: v for k, v in patch.model_dump().items() if v is not None})
+    global _agent
+    changes = {k: v for k, v in patch.model_dump().items() if v is not None}
+    if "model_provider" in changes and changes["model_provider"] != get_settings()["model_provider"]:
+        # The cached Agent was built with the old model — drop it so the
+        # next chat request rebuilds one with whatever's now selected,
+        # instead of the toggle silently doing nothing until a restart.
+        _agent = None
+    update_settings(changes)
     return _settings_payload()
 
 

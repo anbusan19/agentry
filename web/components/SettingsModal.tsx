@@ -15,11 +15,18 @@ interface Platform {
 interface Settings {
   weekly_budget_inr: number;
   spent_this_week: number;
+  model_provider: "gemini" | "bedrock";
   gemini_configured: boolean;
+  bedrock_configured: boolean;
   telegram_configured: boolean;
   platforms: Platform[];
   graph_stats: { items: number; co_purchase_links: number };
 }
+
+const MODEL_LABEL: Record<string, string> = {
+  gemini: "Gemini 3.6 Flash",
+  bedrock: "AWS Bedrock",
+};
 
 type Section = "general" | "storefronts" | "budget" | "notifications" | "graph" | "about";
 
@@ -60,6 +67,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
   const [settings, setSettings] = useState<Settings | null>(null);
   const [budgetInput, setBudgetInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [switchingProvider, setSwitchingProvider] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -85,6 +93,25 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  async function setProvider(provider: "gemini" | "bedrock") {
+    if (!settings || settings.model_provider === provider) return;
+    setSwitchingProvider(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_provider: provider }),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      setSettings(await res.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not switch model.");
+    } finally {
+      setSwitchingProvider(false);
+    }
+  }
 
   async function saveBudget() {
     const value = Number(budgetInput);
@@ -138,15 +165,48 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
           {settings && section === "general" && (
             <section>
               <h2 className="settings__heading">General</h2>
+
+              <label className="settings__field">
+                <span className="settings__row-label">Model provider</span>
+                <div className="settings__toggle">
+                  <button
+                    className={`settings__toggle-btn ${settings.model_provider === "gemini" ? "settings__toggle-btn--active" : ""}`}
+                    onClick={() => setProvider("gemini")}
+                    disabled={switchingProvider}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    className={`settings__toggle-btn ${settings.model_provider === "bedrock" ? "settings__toggle-btn--active" : ""}`}
+                    onClick={() => setProvider("bedrock")}
+                    disabled={switchingProvider}
+                  >
+                    AWS Bedrock
+                  </button>
+                </div>
+              </label>
+              <p className="settings__intro">
+                Takes effect on the next message — no restart needed. Bedrock also needs a model
+                enabled under AWS Console &rarr; Bedrock &rarr; Model access in your configured
+                region.
+              </p>
+
               <div className="settings__row">
-                <span className="settings__row-label">Model</span>
-                <span className="settings__row-value">Gemini 3.6 Flash</span>
+                <span className="settings__row-label">Active model</span>
+                <span className="settings__row-value">{MODEL_LABEL[settings.model_provider]}</span>
               </div>
               <div className="settings__row">
                 <span className="settings__row-label">Gemini API key</span>
                 <span className="settings__row-value">
                   <StatusDot ok={settings.gemini_configured} />
                   {settings.gemini_configured ? "Configured" : "Missing — set GEMINI_API_KEY"}
+                </span>
+              </div>
+              <div className="settings__row">
+                <span className="settings__row-label">AWS credentials</span>
+                <span className="settings__row-value">
+                  <StatusDot ok={settings.bedrock_configured} />
+                  {settings.bedrock_configured ? "Configured" : "Missing — set AWS_ACCESS_KEY_ID"}
                 </span>
               </div>
               <div className="settings__row">

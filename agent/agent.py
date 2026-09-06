@@ -16,6 +16,7 @@ from strands.models.bedrock import BedrockModel
 from strands.models.gemini import GeminiModel
 
 from agent.prompts import SYSTEM_PROMPT
+from knowledge.settings import get_settings
 from tools.add_to_cart import add_to_cart
 from tools.check_budget import check_budget
 from tools.check_wallet_balance import check_wallet_balance
@@ -32,12 +33,12 @@ DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 
 def _build_model():
-    """Pick the model provider from MODEL_PROVIDER (default "gemini").
-    "bedrock" uses AWS credentials via boto3's normal resolution chain
-    (env vars, a named profile, or an IAM role) — nothing AWS-specific is
-    read directly here, boto3 handles that on its own once BedrockModel
-    calls it."""
-    provider = os.environ.get("MODEL_PROVIDER", "gemini").lower()
+    """Pick the model provider from settings (the Settings page's toggle,
+    seeded from MODEL_PROVIDER — default "gemini"). "bedrock" uses AWS
+    credentials via boto3's normal resolution chain (env vars, a named
+    profile, or an IAM role) — nothing AWS-specific is read directly here,
+    boto3 handles that on its own once BedrockModel calls it."""
+    provider = get_settings()["model_provider"]
 
     if provider == "bedrock":
         return BedrockModel(

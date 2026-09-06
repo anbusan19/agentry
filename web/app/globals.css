@@ -1806,6 +1806,37 @@ h1 {
   margin: 16px 0;
 }
 
+.settings__toggle {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--moss);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  width: fit-content;
+}
+
+.settings__toggle-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--paper-dim);
+  font-family: var(--font);
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings__toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings__toggle-btn--active {
+  background: var(--paper);
+  color: var(--moss-deep);
+}
+
 .settings__input {
   background: transparent;
   border: 1px solid var(--line);
