@@ -15,7 +15,7 @@ interface Platform {
 interface Settings {
   weekly_budget_inr: number;
   spent_this_week: number;
-  model_provider: "gemini" | "bedrock";
+  model_provider: "gemini" | "bedrock-mantle";
   gemini_model?: string;
   gemini_configured: boolean;
   bedrock_configured: boolean;
@@ -26,7 +26,7 @@ interface Settings {
 
 const MODEL_LABEL: Record<string, string> = {
   gemini: "Gemini",
-  bedrock: "AWS Bedrock",
+  "bedrock-mantle": "AWS Bedrock",
 };
 
 type Section = "general" | "storefronts" | "budget" | "notifications" | "graph" | "about";
@@ -103,7 +103,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  async function setProvider(provider: "gemini" | "bedrock") {
+  async function setProvider(provider: "gemini" | "bedrock-mantle") {
     if (!settings || settings.model_provider === provider) return;
     setSwitchingProvider(true);
     setError("");
@@ -186,8 +186,8 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                     Gemini
                   </button>
                   <button
-                    className={`settings__toggle-btn ${settings.model_provider === "bedrock" ? "settings__toggle-btn--active" : ""}`}
-                    onClick={() => setProvider("bedrock")}
+                    className={`settings__toggle-btn ${settings.model_provider === "bedrock-mantle" ? "settings__toggle-btn--active" : ""}`}
+                    onClick={() => setProvider("bedrock-mantle")}
                     disabled={switchingProvider}
                   >
                     AWS Bedrock
@@ -195,9 +195,9 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 </div>
               </label>
               <p className="settings__intro">
-                Takes effect on the next message — no restart needed. Bedrock also needs a model
-                enabled under AWS Console &rarr; Bedrock &rarr; Model access in your configured
-                region.
+                Takes effect on the next message — no restart needed. Bedrock runs through the
+                OpenAI-compatible Mantle endpoint and needs real IAM credentials (not just an
+                AWS login) so Strands can mint its bearer tokens.
               </p>
 
               <div className="settings__row">
@@ -225,7 +225,9 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 <span className="settings__row-label">AWS credentials</span>
                 <span className="settings__row-value">
                   <StatusDot ok={settings.bedrock_configured} />
-                  {settings.bedrock_configured ? "Configured" : "Missing — set AWS_ACCESS_KEY_ID"}
+                  {settings.bedrock_configured
+                    ? "Configured"
+                    : "Missing — set AWS_BEARER_TOKEN_BEDROCK (or AWS_ACCESS_KEY_ID)"}
                 </span>
               </div>
               <div className="settings__row">

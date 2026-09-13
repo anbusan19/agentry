@@ -19,10 +19,15 @@ networkx==3.4.2
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 
-# AWS Bedrock model provider (MODEL_PROVIDER=bedrock) — a stretch swap for
-# Gemini; strands-agents already depends on it transitively, pinned here
-# since agent/agent.py now imports it directly.
+# AWS Bedrock model provider — a stretch swap for Gemini, via Bedrock's
+# OpenAI-compatible "Mantle" endpoint (MODEL_PROVIDER=bedrock-mantle), which
+# reaches models not on the native Converse API yet (e.g. openai.gpt-oss-*).
+# aws-bedrock-token-generator mints the short-lived bearer token Strands'
+# OpenAIModel needs, per request, off real IAM credentials; boto3 is what it
+# (and the rest of strands-agents) runs on.
 boto3==1.43.89
+openai==3.13.0
+aws-bedrock-token-generator==1.1.0
 
 # ── Voice mode (optional — server.py POST /api/voice, the console mic) ──────
 # Multipart form parsing for the uploaded audio clip (FastAPI UploadFile).

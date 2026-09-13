@@ -58,7 +58,7 @@ User goal ("restock the pantry")
 | Layer | Tool |
 |---|---|
 | Agent framework | [Strands Agents SDK](https://strandsagents.com/) |
-| Model | Google Gemini (via Strands' `GeminiModel` provider), default — or AWS Bedrock (`BedrockModel`, Claude/Nova) via `MODEL_PROVIDER=bedrock` |
+| Model | Google Gemini (via Strands' `GeminiModel` provider), default — or AWS Bedrock (open-weight models via its OpenAI-compatible Mantle endpoint, `OpenAIModel`) via `MODEL_PROVIDER=bedrock-mantle` |
 | Storefront automation | Playwright (stealth browser automation) |
 | Payments | Platform-native wallet balance at checkout (e.g. Zepto Cash) |
 | Purchase memory | A small NetworkX knowledge graph (restock timing + co-purchase patterns) |
@@ -109,7 +109,7 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ```
 
-To use AWS Bedrock instead, set `MODEL_PROVIDER=bedrock` plus `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `BEDROCK_MODEL_ID` — see `.env.example` for the full set. You'll also need to request access to your chosen model under **AWS Console → Bedrock → Model access** in that same region before it'll actually respond.
+To use AWS Bedrock instead, set `MODEL_PROVIDER=bedrock-mantle` plus `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `MANTLE_MODEL_ID` — see `.env.example` for the full set. This routes through Bedrock's OpenAI-compatible Mantle endpoint via Strands' `OpenAIModel`, which mints its own short-lived bearer token per request, so real IAM credentials are required (not just an `AWS_BEARER_TOKEN_BEDROCK` login).
 
 ### Log in to the storefront (once)
 

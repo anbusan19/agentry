@@ -13,9 +13,7 @@ import os
 
 from strands import Agent
 from strands.agent.conversation_manager import SlidingWindowConversationManager
-from strands.models.bedrock import BedrockModel
 from strands.models.gemini import GeminiModel
-from strands.models.model import CacheConfig
 
 from agent.prompts import SYSTEM_PROMPT
 from knowledge.settings import get_settings
@@ -24,14 +22,13 @@ from tools.check_budget import check_budget
 from tools.check_wallet_balance import check_wallet_balance
 from tools.checkout import checkout
 from tools.get_restock_suggestions import get_restock_suggestions
+from tools.manage_address import manage_address
 from tools.notify import notify_user
 from tools.query_purchase_history import query_purchase_history
 from tools.record_purchase import record_purchase
 from tools.remove_from_cart import remove_from_cart
 from tools.search_products import search_products
 from tools.view_cart import view_cart
-
-DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 # server.py keeps one Agent alive for the whole console session, and every
 # call resends the full message history to the model — with no cap, a long
@@ -46,27 +43,32 @@ DEFAULT_CONVERSATION_WINDOW_SIZE = 30
 
 def _build_model():
     """Pick the model provider from settings (the Settings page's toggle,
-    seeded from MODEL_PROVIDER — default "gemini"). "bedrock" uses AWS
+    seeded from MODEL_PROVIDER — default "gemini"). "bedrock-mantle" uses AWS
     credentials via boto3's normal resolution chain (env vars, a named
-    profile, or an IAM role) — nothing AWS-specific is read directly here,
-    boto3 handles that on its own once BedrockModel calls it."""
+    profile, or an IAM role) — nothing AWS-specific is read directly here."""
     provider = get_settings()["model_provider"]
 
-    if provider == "bedrock":
-        return BedrockModel(
-            region_name=os.environ.get("AWS_REGION", "us-east-1"),
-            model_id=os.environ.get("BEDROCK_MODEL_ID", DEFAULT_BEDROCK_MODEL_ID),
-            # The system prompt and all 11 tool schemas are near-identical on
-            # every single turn — caching them (Anthropic-style, on Claude
-            # models) means Bedrock only re-processes the small part that
-            # actually changed each time, instead of billing full price for
-            # the same few thousand tokens of tools+prompt over and over.
-            cache_config=CacheConfig(strategy="auto"),
-            cache_tools="default",
+    if provider == "bedrock-mantle":
+        # Bedrock's OpenAI-compatible Mantle endpoint, via Strands'
+        # OpenAIModel — reaches Bedrock models not on the native Converse
+        # API (open-weight lines like openai.gpt-oss-*). No API key to
+        # manage: bedrock_mantle_config mints a fresh, short-lived bearer
+        # token per request straight off the standard boto3 credential
+        # chain, so nothing sits around to expire the way a manually pasted
+        # token would. Needs real IAM credentials (AWS_ACCESS_KEY_ID/
+        # AWS_SECRET_ACCESS_KEY, a profile, or a role) to sign those tokens.
+        # Model id comes from settings (the console composer's selector,
+        # seeded from MANTLE_MODEL_ID, default openai.gpt-oss-120b).
+        from strands.models.openai import OpenAIModel
+
+        model_id = get_settings().get("mantle_model") or "openai.gpt-oss-120b"
+        return OpenAIModel(
+            bedrock_mantle_config={"region": os.environ.get("AWS_REGION", "us-east-1")},
+            model_id=model_id,
         )
 
     if provider != "gemini":
-        raise RuntimeError(f'Unknown MODEL_PROVIDER {provider!r} — use "gemini" or "bedrock".')
+        raise RuntimeError(f'Unknown MODEL_PROVIDER {provider!r} — use "gemini" or "bedrock-mantle".')
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -100,6 +102,7 @@ def build_agent() -> Agent:
             add_to_cart,
             remove_from_cart,
             view_cart,
+            manage_address,
             check_budget,
             check_wallet_balance,
             checkout,
