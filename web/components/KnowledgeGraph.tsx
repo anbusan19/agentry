@@ -25,6 +25,9 @@ interface GraphNode extends SimulationNodeDatum {
   last_purchased: string | null;
   overdue: boolean;
   due_soon: boolean;
+  /** Every storefront this item's been bought on, most-frequent first —
+   * used to color the node by its (dominant) platform. */
+  platforms: string[];
   /** Per-node phase offset for the idle wander animation, so nodes don't
    * all drift in lockstep. */
   phase?: number;
@@ -36,11 +39,20 @@ interface GraphLink extends SimulationLinkDatum<GraphNode> {
   weight: number;
 }
 
+/** CSS class for a node's dominant (most-purchased-on) platform, so the
+ * circle fill reads as "which storefront this usually comes from." */
+function platformClass(d: GraphNode): string {
+  const platform = d.platforms?.[0];
+  return platform ? `kg__node--${platform}` : "";
+}
+
 /**
  * The household's purchase-history knowledge graph (knowledge/graph.py),
  * rendered as a force-directed layout: nodes are items, sized by how often
- * they've been bought and colored by restock status; edges are co-purchase
- * links, weighted by how often the two items showed up in the same order.
+ * they've been bought and filled by which storefront they're usually
+ * bought on (kg__node--<platform>, see globals.css), with an overdue/
+ * due-soon ring on top; edges are co-purchase links, weighted by how often
+ * the two items showed up in the same order.
  */
 export default function KnowledgeGraph() {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -115,7 +127,8 @@ export default function KnowledgeGraph() {
           .join<SVGGElement>("g")
           .attr(
             "class",
-            (d) => `kg__node ${d.overdue ? "kg__node--overdue" : d.due_soon ? "kg__node--due" : ""}`
+            (d) =>
+              `kg__node ${platformClass(d)} ${d.overdue ? "kg__node--overdue" : d.due_soon ? "kg__node--due" : ""}`
           )
           .call(
             drag<SVGGElement, GraphNode>()
@@ -228,13 +241,15 @@ export default function KnowledgeGraph() {
     <div className="kg">
       <div className="kg__head">
         <span className="kg__title">Purchase graph</span>
+      </div>
+      <div className="kg__canvas">
         <span className="kg__legend">
           <span className="kg__dot kg__dot--overdue" /> overdue
           <span className="kg__dot kg__dot--due" /> due soon
-          <span className="kg__dot" /> tracked
+          <span className="kg__dot kg__dot--zepto" /> zepto
+          <span className="kg__dot kg__dot--blinkit" /> blinkit
+          <span className="kg__dot kg__dot--instamart" /> instamart
         </span>
-      </div>
-      <div className="kg__canvas">
         {state === "empty" && (
           <p className="kg__note">
             No purchases recorded yet — the graph fills in as orders complete.

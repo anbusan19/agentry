@@ -63,8 +63,16 @@ def main() -> None:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(sdir),
             headless=False,
-            args=["--no-sandbox"],
+            # Same stealth flags as tools._session.get_page() — without
+            # these, Playwright's automation fingerprint (navigator.webdriver,
+            # the AutomationControlled feature) is easy for a site's bot
+            # detection to catch. Swiggy Instamart's did, blocking the very
+            # first request; Zepto/Blinkit happened not to check as hard.
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
             **CONTEXT_ARGS,
+        )
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
         )
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(info["url"])
