@@ -26,6 +26,9 @@ def _defaults() -> dict:
         # composer (server.py lists what the key can reach) so a per-model
         # rate limit can be side-stepped by switching, no restart needed.
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
+        # Which Bedrock Mantle model the agent talks to (MODEL_PROVIDER=
+        # bedrock-mantle). Also selectable from the console composer.
+        "mantle_model": os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b"),
     }
 
 

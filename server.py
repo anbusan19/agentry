@@ -19,8 +19,11 @@ Run: uvicorn server:app --reload --port 8000
 import base64
 import json
 import os
+import re
+from collections import Counter
 from typing import Any, Optional
 
+import networkx as nx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -29,7 +32,7 @@ from pydantic import BaseModel
 
 from agent.agent import build_agent
 from knowledge.budget import spent_within
-from knowledge.graph import load_graph, restock_suggestions
+from knowledge.graph import last_purchased, load_graph, node_platforms, restock_suggestions
 from knowledge.settings import get_settings, update_settings
 from tools._session import platform_status
 
@@ -235,14 +238,59 @@ def _extract_checkout(messages: list[dict[str, Any]]) -> Optional[dict]:
     return {k: data[k] for k in keep if data.get(k) is not None}
 
 
+_RETRY_RE = re.compile(r"retry(?:delay)?[\"\s:]+(\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
+
+
+def _friendly_model_error(exc: Exception) -> Optional[str]:
+    """Turn a known model-provider failure into a plain message for the
+    console. Returns None for anything unrecognised (let it 500 so real
+    bugs stay visible)."""
+    text = str(exc)
+    low = text.lower()
+
+    if "429" in text or "resource_exhausted" in low or "rate limit" in low or "quota" in low:
+        m = _RETRY_RE.search(text)
+        wait = f" Try again in about {round(float(m.group(1)))}s" if m else " Give it a minute"
+        return (
+            "Hit the Gemini free-tier rate limit for this model."
+            f"{wait}, or pick a different Gemini model from the selector in the message box. "
+            "Each model has its own small free quota, so switching usually gets you moving again."
+        )
+    if "accessdenied" in low or ("bedrock" in low and "access" in low) or "not authorized to perform" in low:
+        return (
+            "The selected Bedrock model isn't enabled for your AWS account in this region. "
+            "Enable it under Bedrock > Model access, or switch the provider back to Gemini in Settings."
+        )
+    if "api key" in low or "api_key" in low or "unauthenticated" in low or "invalid authentication" in low:
+        return (
+            "The model API key looks missing or invalid. Check GEMINI_API_KEY (or your AWS "
+            "credentials) in .env, then restart the server."
+        )
+    return None
+
+
+async def _run_agent_turn(agent, message: str) -> tuple[str, list[dict[str, Any]]]:
+    """Run one agent turn. On a recognised provider error, roll the
+    half-finished turn out of the agent's history and return a friendly
+    message with no new tool messages."""
+    before = len(agent.messages)
+    try:
+        result = await run_in_threadpool(agent, message)
+        return str(result), agent.messages[before:]
+    except Exception as exc:
+        friendly = _friendly_model_error(exc)
+        if friendly is None:
+            raise
+        print(f"[agent] turn failed: {exc}")
+        del agent.messages[before:]
+        return friendly, []
+
+
 @app.post("/api/chat", response_model=ChatReply)
 async def chat(body: ChatMessage) -> ChatReply:
-    agent = _get_agent()
-    before = len(agent.messages)
-    result = await run_in_threadpool(agent, body.message)
-    new_messages = agent.messages[before:]
+    reply, new_messages = await _run_agent_turn(_get_agent(), body.message)
     return ChatReply(
-        reply=str(result),
+        reply=reply,
         products=_extract_search_batches(new_messages),
         cart=_extract_cart(new_messages),
         checkout=_extract_checkout(new_messages),
@@ -276,11 +324,7 @@ async def voice(clip: UploadFile = File(...)) -> VoiceReply:
     if not transcript:
         return VoiceReply(transcript="", reply="Sorry, I didn't catch that. Say that again?")
 
-    agent = _get_agent()
-    before = len(agent.messages)
-    result = await run_in_threadpool(agent, frame_transcript(transcript))
-    new_messages = agent.messages[before:]
-    reply_text = str(result)
+    reply_text, new_messages = await _run_agent_turn(_get_agent(), frame_transcript(transcript))
 
     audio_b64 = audio_mime = None
     try:
@@ -319,7 +363,12 @@ async def voice_health():
 @app.get("/api/graph")
 async def graph():
     """The purchase-history knowledge graph, shaped for a force-directed
-    viz: nodes carry restock status, edges carry co-purchase weight."""
+    viz: nodes carry restock status and which storefront(s) they were
+    bought on, edges carry co-purchase weight, and clusters group the
+    connected "networks" of related items (>= 2 items, sharing a
+    co-purchase edge) with the platform(s) behind them — a first step
+    toward showing a per-cluster price comparison across storefronts once
+    more than one is wired up."""
     g = load_graph()
     due_by_item = {d["item"]: d for d in restock_suggestions()["due"]}
 
@@ -327,9 +376,10 @@ async def graph():
         {
             "id": item,
             "purchase_count": len(attrs.get("purchases", [])),
-            "last_purchased": max(attrs["purchases"]) if attrs.get("purchases") else None,
+            "last_purchased": last_purchased(attrs),
             "overdue": due_by_item.get(item, {}).get("overdue", False),
             "due_soon": item in due_by_item,
+            "platforms": node_platforms(attrs),
         }
         for item, attrs in g.nodes(data=True)
     ]
@@ -337,13 +387,42 @@ async def graph():
         {"source": a, "target": b, "weight": attrs.get("co_purchase", 1)}
         for a, b, attrs in g.edges(data=True)
     ]
-    return {"nodes": nodes, "links": links}
+
+    clusters = []
+    for i, component in enumerate(nx.connected_components(g)):
+        if len(component) < 2:
+            continue  # an isolated item isn't a "network" to label
+        platform_counts: Counter[str] = Counter()
+        for item in component:
+            platform_counts.update(node_platforms(g.nodes[item]))
+        clusters.append(
+            {
+                "id": i,
+                "items": sorted(component),
+                "platforms": [p for p, _ in platform_counts.most_common()],
+            }
+        )
+
+    return {"nodes": nodes, "links": links, "clusters": clusters}
+
+
+# Bedrock Mantle has no equivalent to Gemini's models.list() readily
+# reachable with just an OpenAI-compatible client, so this is a hand-picked
+# set rather than a live-fetched one — update it as new lines land.
+MANTLE_MODELS = [
+    "openai.gpt-oss-20b",
+    "openai.gpt-oss-120b",
+    "google.gemma-4-e2b",
+    "google.gemma-4-31b",
+    "moonshotai.kimi-k2-thinking",
+]
 
 
 class SettingsPatch(BaseModel):
     weekly_budget_inr: Optional[float] = None
     model_provider: Optional[str] = None
     gemini_model: Optional[str] = None
+    mantle_model: Optional[str] = None
 
 
 def _settings_payload() -> dict:
@@ -355,8 +434,14 @@ def _settings_payload() -> dict:
         "model_provider": settings["model_provider"],
         "gemini_model": settings.get("gemini_model", "gemini-3.6-flash"),
         "gemini_models": _gemini_models(),
+        "mantle_model": settings.get("mantle_model", MANTLE_MODELS[1]),
+        "mantle_models": MANTLE_MODELS,
         "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
-        "bedrock_configured": bool(os.environ.get("AWS_ACCESS_KEY_ID")),
+        "bedrock_configured": bool(
+            os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+            or os.environ.get("AWS_ACCESS_KEY_ID")
+            or os.environ.get("AWS_PROFILE")
+        ),
         "telegram_configured": bool(
             os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
         ),
@@ -380,7 +465,7 @@ async def update_settings_endpoint(patch: SettingsPatch):
     )
     model_changed = (
         "gemini_model" in changes and changes["gemini_model"] != current.get("gemini_model")
-    )
+    ) or ("mantle_model" in changes and changes["mantle_model"] != current.get("mantle_model"))
     if provider_changed or model_changed:
         # The cached Agent was built with the old model — drop it so the
         # next chat request rebuilds one with whatever's now selected,
