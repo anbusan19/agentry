@@ -2,6 +2,7 @@
 
 import ProductTiles, { type ProductBatch } from "@/components/ProductTiles";
 import PaymentCard, { type Cart, type CheckoutInfo } from "@/components/PaymentCard";
+import WebThreads from "@/components/WebThreads";
 
 interface Product {
   name: string;
@@ -40,17 +41,36 @@ export default function VoiceStage({
 
   return (
     <div className="vstage">
+      {/* Woven-thread backdrop, retinted to the project's petal / sage /
+          paper palette — matches VoiceMode's GradientWaves so the two voice
+          surfaces read as one. Deliberately dim; content sits on top. */}
+      <WebThreads
+        className="vstage__threads"
+        color1="#f6dde2"
+        color2="#7f8768"
+        color3="#f2efe6"
+        speed={0.14}
+        threadCount={5}
+        frequency={4.0}
+        spread={0.16}
+        taper={1.0}
+        position={0.5}
+        fanMode="center"
+        glow={0.018}
+        falloff={0.62}
+        thickness={1.1}
+        brightness={0.5}
+        opacity={0.5}
+        mirror
+        grain
+        grainIntensity={0.035}
+        mouseInteraction
+        mouseStrength={0.25}
+      />
+      <div className="vstage__scrim" aria-hidden="true" />
+
       <div className="vstage__head">
-        <span className="vstage__eyebrow">Voice mode</span>
-        <span className="vstage__title">
-          {showPayment
-            ? checkout?.status === "paid"
-              ? "Order confirmed"
-              : "Review & confirm"
-            : showProducts
-              ? "Pick one to add"
-              : "Listening"}
-        </span>
+        <span className="vstage__title">Agentry Vision</span>
       </div>
 
       <div className="vstage__body">
@@ -67,13 +87,6 @@ export default function VoiceStage({
 
         {showProducts && (
           <ProductTiles batches={products} onAdd={onAdd} addingUrl={addingUrl} />
-        )}
-
-        {!showPayment && !showProducts && (
-          <div className="vstage__idle">
-            <span className="vstage__pulse" aria-hidden="true" />
-            <p>Talk to Agentry. Anything it wants to show you — choices, a cart, a receipt — appears here.</p>
-          </div>
         )}
       </div>
     </div>

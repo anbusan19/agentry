@@ -53,7 +53,6 @@ export default function VoiceMode({
   onExchange?: (x: VoiceExchange) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
-  const [caption, setCaption] = useState("");
   const [error, setError] = useState("");
   const [mic, setMic] = useState<MicPermission>("unknown");
   const [requesting, setRequesting] = useState(false);
@@ -212,7 +211,6 @@ export default function VoiceMode({
 
   function endTurn() {
     setMode("thinking");
-    setCaption("");
     try {
       recorderRef.current?.stop(); // -> handleTurnStop
     } catch {
@@ -233,7 +231,6 @@ export default function VoiceMode({
 
   async function upload(blob: Blob) {
     setMode("thinking");
-    setCaption("Thinking…");
     try {
       const form = new FormData();
       form.append("clip", blob, "turn.webm");
@@ -248,7 +245,6 @@ export default function VoiceMode({
         cart: data.cart,
         checkout: data.checkout,
       });
-      setCaption(data.reply || "");
 
       if (data.audio_b64) {
         playReply(data.audio_b64, data.audio_mime || "audio/wav");
@@ -314,7 +310,6 @@ export default function VoiceMode({
 
   async function startCall() {
     setError("");
-    setCaption("");
     setReplayReady(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -371,7 +366,6 @@ export default function VoiceMode({
     ctxRef.current = null;
     analyserRef.current = null;
     setReplayReady(false);
-    setCaption("");
     setMode("idle");
   }, [setMode]);
 
@@ -512,26 +506,13 @@ export default function VoiceMode({
 
             <p className="voice__status">{status}</p>
 
-            {inCall ? (
+            {inCall && (
               <button className="voice__end" onClick={endCall}>
                 End call
               </button>
-            ) : (
-              <button className="voice__grant" onClick={startCall}>
-                {replayReady ? "Start a new call" : "Start call"}
-              </button>
             )}
 
-            {error ? (
-              <p className="voice__hint voice__hint--error">{error}</p>
-            ) : caption ? (
-              <p className="voice__hint">{caption}</p>
-            ) : (
-              <p className="voice__hint">
-                Just talk, like a phone call. Pause when you&apos;re done and Agentry answers;
-                talk over it to cut in.
-              </p>
-            )}
+            {error && <p className="voice__hint voice__hint--error">{error}</p>}
           </>
         )}
       </div>

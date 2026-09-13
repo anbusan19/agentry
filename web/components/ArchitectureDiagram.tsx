@@ -123,7 +123,7 @@ function Bullet({ children }: { children: React.ReactNode }) {
    with Telegram above, Goal left, Playwright below, Storefront right. */
 const LINKS = {
   goalAgent: "M336 445 C 384 445, 388 430, 436 430",
-  agentTelegram: "M602 300 L602 230",
+  agentTelegram: "M602 300 L602 242",
   agentBrowser: "M602 592 L602 646",
   browserStore: "M752 704 C 852 704, 918 690, 918 572",
   storeAgent: "M1020 322 C 1030 206, 880 246, 768 336",
@@ -328,10 +328,6 @@ export function ArchitectureDiagram() {
             <text className="arch__linelabel" x={806} y={664} textAnchor="middle">checkout</text>
             <text className="arch__linelabel arch__linelabel--return" x={904} y={224}>order result</text>
             <text className="arch__linelabel" x={1200} y={436} textAnchor="middle">history</text>
-
-            <circle className="arch__packet" r={3.4} style={{ offsetPath: `path("${LINKS.goalAgent}")`, animationDelay: "0s" }} />
-            <circle className="arch__packet" r={3.4} style={{ offsetPath: `path("${LINKS.browserStore}")`, animationDelay: "1.1s" }} />
-            <circle className="arch__packet arch__packet--return" r={3.2} style={{ offsetPath: `path("${LINKS.storeAgent}")`, animationDelay: "1.7s" }} />
           </svg>
         </div>
       </div>

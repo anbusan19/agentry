@@ -5,6 +5,10 @@
   --paper: #f2efe6;
   --paper-dim: #c9c7bb;
   --petal: #f6dde2;
+  /* purchase-graph node fill, by storefront */
+  --zepto-light: #d9c7f2;
+  --blinkit-light: #f3dd8c;
+  --instamart-light: #a9d4f2;
   --line: rgba(242, 239, 230, 0.14);
   --gutter: clamp(24px, 5vw, 72px);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
@@ -509,12 +513,15 @@ h1 {
 }
 
 .arch__scroll {
-  /* resolves against .arch (the container); shared with .arch__stage below */
-  --arch-s: clamp(0.35, calc(100cqw / 1564px), 1.3);
+  /* resolves against .arch (the container); shared with .arch__stage below.
+     Fills the column width, capped at 1x. */
+  --arch-s: clamp(0.32, calc(100cqw / 1564px), 1);
   width: 100%;
   height: calc(872px * var(--arch-s));
-  padding-top: 16px;
+  padding-top: 12px;
   overflow: hidden;
+  display: flex;
+  justify-content: center;
 }
 
 @supports not (width: 1cqw) {
@@ -524,6 +531,7 @@ h1 {
     padding-bottom: 8px;
     overflow-x: auto;
     overflow-y: hidden;
+    justify-content: flex-start;
   }
   .arch__stage {
     transform: none;
@@ -532,7 +540,7 @@ h1 {
 
 .arch__stage {
   position: relative;
-  transform-origin: top left;
+  transform-origin: top center;
   transform: scale(var(--arch-s, 1));
   flex: none;
   width: 1564px;
@@ -587,21 +595,24 @@ h1 {
   position: absolute;
   z-index: 2;
   opacity: 0;
-  transform: translateY(14px) scale(0.98);
-  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
-  transition-delay: calc(var(--i, 0) * 100ms);
+  transform: translateY(26px) scale(0.955);
+  filter: blur(4px);
+  transition: opacity 0.7s var(--ease), transform 0.8s var(--ease), filter 0.7s var(--ease);
+  transition-delay: calc(var(--i, 0) * 130ms);
+  will-change: transform, opacity;
 }
 
 .arch__stage[data-visible="true"] .arch__node {
   opacity: 1;
   transform: none;
+  filter: none;
 }
 
 .arch__node--telegram {
   left: 450px;
   top: 56px;
   width: 304px;
-  height: 174px;
+  height: 190px;
 }
 .arch__node--agent {
   left: 436px;
@@ -619,7 +630,7 @@ h1 {
   left: 452px;
   top: 646px;
   width: 300px;
-  height: 176px;
+  height: 196px;
 }
 .arch__node--fulfil {
   left: 846px;
@@ -631,18 +642,18 @@ h1 {
   left: 1240px;
   top: 300px;
   width: 300px;
-  height: 384px;
+  height: 398px;
 }
 
 .arch__card {
   height: 100%;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(10, 11, 9, 0.82);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  padding: 20px;
+  padding: 15px 16px;
   transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
 }
 
@@ -667,24 +678,24 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .arch__ico-wrap,
 .arch__logos {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px;
+  gap: 5px;
+  padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.05);
 }
 
 .arch__logo {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
 }
 
 .arch__aws {
@@ -695,8 +706,8 @@ h1 {
 
 .arch__ico {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   fill: none;
   stroke: var(--paper-dim);
   stroke-width: 1.6;
@@ -705,13 +716,13 @@ h1 {
 }
 
 .arch__badge {
-  padding: 3px 9px;
+  padding: 2px 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   font-family: var(--mono-geist);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--paper-dim);
   white-space: nowrap;
@@ -728,9 +739,9 @@ h1 {
 }
 
 .arch__card h3 {
-  margin: 0 0 8px;
+  margin: 0 0 7px;
   font-family: var(--serif);
-  font-size: 1.2rem;
+  font-size: 1.12rem;
   font-weight: 400;
   letter-spacing: -0.01em;
   color: var(--paper);
@@ -738,8 +749,8 @@ h1 {
 
 .arch__card p {
   margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
+  font-size: 0.76rem;
+  line-height: 1.45;
   color: var(--paper-dim);
 }
 
@@ -748,23 +759,23 @@ h1 {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .arch__li {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  font-size: 0.78rem;
-  line-height: 1.45;
+  gap: 7px;
+  font-size: 0.74rem;
+  line-height: 1.42;
   color: var(--paper-dim);
 }
 
 .arch__dot {
   flex: none;
   margin-top: 0.42em;
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   background: var(--petal);
   transform: rotate(45deg);
 }
@@ -780,14 +791,14 @@ h1 {
 }
 
 .arch__code {
-  margin: 12px 0 0;
+  margin: 9px 0 0;
   max-width: 100%;
-  padding: 9px 10px;
+  padding: 7px 9px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.03);
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.54rem;
   line-height: 1.5;
   color: var(--moss-hi);
   white-space: pre;
@@ -797,12 +808,12 @@ h1 {
 .arch__step {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 9px;
   padding-left: 6px;
   font-family: var(--mono-geist);
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--moss-hi);
 }
@@ -893,37 +904,13 @@ h1 {
   fill: rgba(153, 214, 176, 0.8);
 }
 
-.arch__packet {
-  fill: var(--petal);
-  offset-rotate: 0deg;
-  opacity: 0;
-  animation: arch-run 2.6s linear infinite;
-  animation-play-state: paused;
-}
-.arch__stage[data-visible="true"] .arch__packet {
-  opacity: 1;
-  animation-play-state: running;
-}
-.arch__packet--return {
-  fill: #99d6b0;
-}
-
 .arch__caption {
-  margin-top: 20px;
+  margin-top: 16px;
   font-family: var(--mono-geist);
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--moss-hi);
-}
-
-@keyframes arch-run {
-  from {
-    offset-distance: 0%;
-  }
-  to {
-    offset-distance: 100%;
-  }
 }
 
 /* ---------- knowledge-graph orb (inside the memory node) ---------- */
@@ -936,18 +923,10 @@ h1 {
 .arch__orb {
   position: relative;
   width: 100%;
-  max-width: 220px;
+  max-width: 178px;
   aspect-ratio: 1 / 1;
-  margin: 16px auto auto;
+  margin: 10px auto;
   flex: 1 1 auto;
-}
-
-.arch__orb::after {
-  content: "";
-  position: absolute;
-  inset: 5%;
-  border-radius: 50%;
-  border: 1px solid rgba(242, 239, 230, 0.08);
 }
 
 .kgraph__canvas {
@@ -1047,8 +1026,9 @@ h1 {
     transition: none;
   }
 
-  .arch__packet {
-    display: none;
+  .arch__node,
+  .arch__enclosure {
+    filter: none;
   }
 
   .chat__row {
@@ -1110,7 +1090,30 @@ h1 {
   --chat-pad: clamp(14px, 2vw, 22px);
 }
 
+/* the message area between the header and composer — the light rays live
+   here so they never touch the header bar or the composer */
+.chat__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* two-class selector so it beats LightRays.css's own
+   .light-rays-container { position: relative; z-index: 3 } */
+.chat .chat__rays {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
+
 .chat__head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1478,6 +1481,8 @@ h1 {
 }
 
 .chat__list {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1485,6 +1490,24 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+/* pre-first-turn prompt, centred in the panel; gone once a message exists */
+.chat__welcome {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: chat-row-in 0.4s ease both;
+}
+
+.chat__welcome-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(1.9rem, 4.5vw, 2.6rem);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--paper-dim);
 }
 
 .chat__row {
@@ -1615,6 +1638,8 @@ h1 {
 /* Composer: one rounded well holding the input on top and a control row
    (model selector · voice · send-arrow) beneath. */
 .chat__composer {
+  position: relative;
+  z-index: 1;
   margin: 12px var(--chat-pad) 18px;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -1762,7 +1787,7 @@ h1 {
 .kg__head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 18px var(--gutter) 14px;
   border-bottom: 1px solid var(--line);
 }
@@ -1772,12 +1797,23 @@ h1 {
   font-size: 1.4rem;
 }
 
+/* legend now floats inside the graph pane rather than sitting in the bar */
 .kg__legend {
+  position: absolute;
+  left: var(--gutter);
+  bottom: 16px;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(43, 46, 40, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   font-family: var(--mono-geist);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   letter-spacing: 0.04em;
   color: var(--paper-dim);
   text-transform: uppercase;
@@ -1801,6 +1837,18 @@ h1 {
 
 .kg__dot--due {
   background: var(--paper);
+}
+
+.kg__dot--zepto {
+  background: var(--zepto-light);
+}
+
+.kg__dot--blinkit {
+  background: var(--blinkit-light);
+}
+
+.kg__dot--instamart {
+  background: var(--instamart-light);
 }
 
 .kg__canvas {
@@ -1848,15 +1896,29 @@ h1 {
   cursor: grab;
 }
 
+/* Fill by which storefront the item is (mostly) bought on. */
+.kg__node--zepto circle {
+  fill: var(--zepto-light);
+}
+
+.kg__node--blinkit circle {
+  fill: var(--blinkit-light);
+}
+
+.kg__node--instamart circle {
+  fill: var(--instamart-light);
+}
+
+/* Restock status reads as a stroke ring on top of the platform fill, so
+   both signals stay visible at once. */
 .kg__node--due circle {
-  fill: var(--moss-hi);
   stroke: var(--paper);
+  stroke-width: 2px;
 }
 
 .kg__node--overdue circle {
-  fill: var(--petal);
   stroke: var(--petal);
-  fill-opacity: 0.85;
+  stroke-width: 2.5px;
 }
 
 .kg__label {
@@ -2416,29 +2478,47 @@ h1 {
   animation: chat-row-in 0.3s ease both;
 }
 
+/* two-class selector so it beats WebThreads.css's own
+   .web-threads-container { position: relative } regardless of import order */
+.vstage .vstage__threads {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.vstage__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 60% at 50% 45%, rgba(19, 20, 16, 0.62), rgba(19, 20, 16, 0.28) 60%, rgba(19, 20, 16, 0.55)),
+    linear-gradient(to bottom, rgba(19, 20, 16, 0.5), rgba(19, 20, 16, 0) 30%, rgba(19, 20, 16, 0.55));
+}
+
 .vstage__head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 12px;
   padding: 18px var(--gutter) 14px;
   border-bottom: 1px solid var(--line);
-}
-
-.vstage__eyebrow {
-  font-family: var(--mono-geist);
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--petal);
+  background: rgba(43, 46, 40, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .vstage__title {
   font-family: var(--serif);
-  font-size: 1.15rem;
+  font-size: 1.4rem;
   color: var(--paper);
 }
 
 .vstage__body {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2450,42 +2530,6 @@ h1 {
 
 .vstage__body .tiles {
   align-self: stretch;
-}
-
-.vstage__idle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-  text-align: center;
-  color: var(--paper-dim);
-}
-
-.vstage__idle p {
-  margin: 0;
-  max-width: 34ch;
-  font-family: var(--mono-geist);
-  font-size: 0.72rem;
-  line-height: 1.7;
-}
-
-.vstage__pulse {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--petal);
-  box-shadow: 0 0 0 0 rgba(246, 221, 226, 0.5);
-  animation: vstage-pulse 2.4s var(--ease) infinite;
-}
-
-@keyframes vstage-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(246, 221, 226, 0.45);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 22px rgba(246, 221, 226, 0);
-  }
 }
 
 /* ---------- payment / order card (chat + stage) ---------- */
@@ -2621,8 +2665,7 @@ h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vstage,
-  .vstage__pulse {
+  .vstage {
     animation: none;
   }
 }

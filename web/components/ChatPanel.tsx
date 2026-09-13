@@ -9,6 +9,7 @@ import ProductTiles, { type ProductBatch } from "@/components/ProductTiles";
 import PaymentCard, { type Cart, type CheckoutInfo } from "@/components/PaymentCard";
 import VoiceMode, { type VoiceExchange } from "@/components/VoiceMode";
 import VoiceStage from "@/components/VoiceStage";
+import LightRays from "@/components/LightRays";
 import { DotmCircular20 } from "@/components/ui/dotm-circular-20";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -23,9 +24,11 @@ interface Message {
 }
 
 interface ChatConfig {
-  model_provider: "gemini" | "bedrock";
+  model_provider: "gemini" | "bedrock-mantle";
   gemini_model: string;
   gemini_models: string[];
+  mantle_model: string;
+  mantle_models: string[];
 }
 
 // Pinned locale + hour12: toLocaleTimeString's *default* locale/format can
@@ -35,6 +38,18 @@ interface ChatConfig {
 // output deterministic across environments.
 function timeLabel(at: number) {
   return new Date(at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+// Optional, build-time. Shown after the time-of-day greeting when set.
+const USER_NAME = process.env.NEXT_PUBLIC_USER_NAME?.trim();
+
+/** A casual, time-of-day welcome for the empty chat — Claude-style. */
+function greetingFor(hour: number, name?: string): string {
+  if (hour < 5) return name ? `Midnight cravings, ${name}?` : "Midnight cravings?";
+  if (hour < 12) return name ? `Good morning, ${name}` : "Good morning";
+  if (hour < 17) return name ? `Good afternoon, ${name}` : "Good afternoon";
+  if (hour < 22) return name ? `Good evening, ${name}` : "Good evening";
+  return name ? `Late night, ${name}?` : "Late night restock?";
 }
 
 /**
@@ -50,18 +65,10 @@ export default function ChatPanel({
    * right-hand pane (knowledge graph <-> voice stage). */
   onVoiceChange?: (on: boolean) => void;
 }) {
-  // `at: 0` here, not Date.now() — a timestamp baked into the initial
-  // render would embed whatever instant the server happened to render at
-  // into the SSR-ed HTML, which the client's own hydration pass has no way
-  // to reproduce exactly. Filled in for real once mounted, below.
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "agent",
-      content:
-        "I'm Agentry. Give me a goal, something like \"restock the pantry\" or \"what's in my cart,\" and I'll take it from there.",
-      at: 0,
-    },
-  ]);
+  // Starts empty — before the first turn the panel shows a centred
+  // "How can I help?" prompt instead of a greeting bubble; it disappears
+  // the moment there's a real message.
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -73,10 +80,12 @@ export default function ChatPanel({
   // wiping it from the transcript; any new agent reply clears the flag.
   const [stagePaymentHidden, setStagePaymentHidden] = useState(false);
   const [stageHost, setStageHost] = useState<Element | null>(null);
+  // Computed after mount so the server render and hydration agree.
+  const [greeting, setGreeting] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setMessages((m) => (m.length === 1 && m[0].at === 0 ? [{ ...m[0], at: Date.now() }] : m));
+    setGreeting(greetingFor(new Date().getHours(), USER_NAME));
   }, []);
 
   useEffect(() => {
@@ -88,9 +97,9 @@ export default function ChatPanel({
   }, [voiceOpen, onVoiceChange]);
 
   // The provider (gemini / bedrock) is set in Settings; the composer only
-  // reads it, plus the Gemini model list, so a per-model rate limit can be
-  // dodged by switching model right from the input row. Refetched whenever
-  // Settings closes, since the provider may have changed there.
+  // reads it, plus the per-provider model list, so a per-model rate limit
+  // can be dodged by switching model right from the input row. Refetched
+  // whenever Settings closes, since the provider may have changed there.
   const loadConfig = useCallback(() => {
     fetch(`${API_BASE}/api/settings`)
       .then((res) => (res.ok ? res.json() : null))
@@ -100,6 +109,8 @@ export default function ChatPanel({
           model_provider: data.model_provider,
           gemini_model: data.gemini_model,
           gemini_models: data.gemini_models ?? [],
+          mantle_model: data.mantle_model,
+          mantle_models: data.mantle_models ?? [],
         });
       })
       .catch(() => {});
@@ -109,14 +120,14 @@ export default function ChatPanel({
     loadConfig();
   }, [loadConfig]);
 
-  async function changeModel(next: string) {
-    setConfig((c) => (c ? { ...c, gemini_model: next } : c));
+  async function changeModel(field: "gemini_model" | "mantle_model", next: string) {
+    setConfig((c) => (c ? { ...c, [field]: next } : c));
     setModelSaving(true);
     try {
       await fetch(`${API_BASE}/api/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gemini_model: next }),
+        body: JSON.stringify({ [field]: next }),
       });
     } catch {
       // best-effort; the next chat call will surface a real error if it stuck
@@ -293,7 +304,30 @@ export default function ChatPanel({
           stageHost
         )}
 
-      <div className="chat__list" ref={listRef}>
+      <div className="chat__stage">
+        {/* Ambient light rays, retinted to the project's petal tone — a quiet
+            backdrop confined to the message area, behind the transcript. */}
+        <LightRays
+          className="chat__rays"
+          raysOrigin="top-center"
+          raysColor="#f6dde2"
+          raysSpeed={0.7}
+          lightSpread={0.85}
+          rayLength={1.5}
+          fadeDistance={1.2}
+          saturation={0.9}
+          followMouse
+          mouseInfluence={0.08}
+          noiseAmount={0.05}
+          distortion={0.03}
+        />
+
+        <div className="chat__list" ref={listRef}>
+          {messages.length === 0 && !sending && greeting && (
+            <div className="chat__welcome">
+              <p className="chat__welcome-title">{greeting}</p>
+            </div>
+          )}
         {messages.map((m, i) => (
           <div key={i} className={`chat__row chat__row--${m.role}`}>
             <span className="chat__who">{m.role === "user" ? "You" : m.role === "error" ? "Console" : "Agentry"}</span>
@@ -329,11 +363,12 @@ export default function ChatPanel({
           </div>
         ))}
 
-        {sending && (
-          <div className="chat__thinking" aria-live="polite" aria-label="Agentry is thinking">
-            <DotmCircular20 size={26} dotSize={3} />
-          </div>
-        )}
+          {sending && (
+            <div className="chat__thinking" aria-live="polite" aria-label="Agentry is thinking">
+              <DotmCircular20 size={26} dotSize={3} />
+            </div>
+          )}
+        </div>
       </div>
 
       {!sending && (
@@ -357,7 +392,7 @@ export default function ChatPanel({
                 </svg>
                 <select
                   value={config.gemini_model}
-                  onChange={(e) => changeModel(e.target.value)}
+                  onChange={(e) => changeModel("gemini_model", e.target.value)}
                   disabled={modelSaving}
                   aria-label="Gemini model"
                 >
@@ -371,9 +406,35 @@ export default function ChatPanel({
                   ))}
                 </select>
               </label>
+            ) : config?.model_provider === "bedrock-mantle" ? (
+              <label className="chat__model" title="Bedrock Mantle model — switch if one is rate-limited">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path
+                    d="M6 1.2l1.4 3 3.4.4-2.5 2.3.7 3.3L6 9.8 3 11.5l.7-3.3L1.2 5.6l3.4-.4L6 1.2z"
+                    stroke="currentColor"
+                    strokeWidth="1"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <select
+                  value={config.mantle_model}
+                  onChange={(e) => changeModel("mantle_model", e.target.value)}
+                  disabled={modelSaving}
+                  aria-label="Bedrock Mantle model"
+                >
+                  {(config.mantle_models.includes(config.mantle_model)
+                    ? config.mantle_models
+                    : [config.mantle_model, ...config.mantle_models]
+                  ).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
             ) : (
               <span className="chat__model chat__model--static" title="Change provider in Settings">
-                {config?.model_provider === "bedrock" ? "AWS Bedrock" : "model"}
+                model
               </span>
             )}
 
