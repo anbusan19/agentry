@@ -282,6 +282,17 @@ def _extract_checkout(messages: list[dict[str, Any]]) -> Optional[dict]:
 
 _RETRY_RE = re.compile(r"retry(?:delay)?[\"\s:]+(\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
 
+# Some "thinking" models (confirmed live: moonshotai.kimi-k2-thinking via
+# bedrock-mantle) put their chain-of-thought directly in the completion
+# text as a <think>...</think> block, rather than in a separate structured
+# field Strands can strip on its own — unlike, say, gpt-oss's Harmony
+# channels, which at least arrive as their own content block. Left alone,
+# that raw reasoning block renders straight into the console's chat bubble
+# and gets read aloud verbatim by TTS. Stripped once here, in the one
+# place both /api/chat and /api/voice pull their reply text from, rather
+# than in each endpoint separately.
+_REASONING_TAG_RE = re.compile(r"<(think|thinking|reasoning)>.*?</\1>\s*", re.IGNORECASE | re.DOTALL)
+
 
 # Per-provider naming for the messages below — keyed by knowledge.settings'
 # "model_provider" values (agent/agent.py's build_agent switch). Fixes a
@@ -333,7 +344,8 @@ async def _run_agent_turn(agent, message: str) -> tuple[str, list[dict[str, Any]
     before = len(agent.messages)
     try:
         result = await run_in_threadpool(agent, message)
-        return str(result), agent.messages[before:]
+        reply = _REASONING_TAG_RE.sub("", str(result)).strip()
+        return reply, agent.messages[before:]
     except Exception as exc:
         friendly = _friendly_model_error(exc)
         if friendly is None:
