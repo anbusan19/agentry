@@ -353,126 +353,283 @@ h1 {
   margin: 18px 0 0;
 }
 
-/* ---------- steps ---------- */
+/* ---------- proof strip ---------- */
+/* Thin SaaS-pattern "integrates with" band right under the hero — no
+   kicker/title rhythm, just a label and the storefront marks. */
 
-.steps {
+.proof {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: #1f221c;
+}
+
+.proof__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 40px;
+  padding: 26px 0;
+}
+
+.proof__label {
+  font-family: var(--mono-geist);
+  font-size: 0.76rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--moss-hi);
+}
+
+.proof__logos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: clamp(20px, 4vw, 44px);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proof__logos li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono-geist);
+  font-size: 0.92rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--paper-dim);
+}
+
+.proof__logos img {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+/* ---------- feature bento (product section) ---------- */
+
+.feature-section {
+  position: relative;
+  overflow: hidden;
+}
+
+.feature-section__bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.feature-section .wrap {
+  position: relative;
+  z-index: 1;
+}
+
+.bento {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 20px;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: minmax(200px, auto);
 }
 
-.step {
+.bento__card {
+  display: flex;
+  flex-direction: column;
   padding: clamp(24px, 3vw, 38px);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: 16px;
+  background: rgba(18, 20, 16, 0.42);
+  backdrop-filter: blur(2px);
   transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
-.step:hover {
+.bento__card:hover {
   transform: translateY(-3px);
   border-color: rgba(242, 239, 230, 0.28);
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(18, 20, 16, 0.6);
 }
 
-.step__n {
+.bento__card--big {
+  grid-column: 1 / -1;
+  min-height: 160px;
+  justify-content: flex-end;
+}
+
+.bento__card--big .bento__title {
+  font-size: 2rem;
+}
+
+.bento__n {
   font-family: var(--mono-geist);
-  font-size: 1.3rem;
+  font-size: 0.8rem;
   font-weight: 500;
   color: var(--moss-hi);
 }
 
-.step__title {
-  margin: 14px 0 10px;
+.bento__title {
+  margin: 16px 0 10px;
   font-family: var(--serif);
   font-size: 1.5rem;
   font-weight: 400;
   letter-spacing: -0.01em;
 }
 
-.step__body {
+.bento__body {
   margin: 0;
   color: var(--paper-dim);
   font-size: 0.98rem;
 }
 
-/* ---------- points ---------- */
+/* ---------- differentiators ---------- */
 
-.points {
+.different__lead {
+  display: flex;
+  flex-direction: column;
+}
+
+.different__visual {
+  margin-top: clamp(28px, 4vh, 48px);
+  height: 220px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.feature-grid {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 22px;
+  gap: 16px;
+  grid-template-columns: repeat(2, 1fr);
+  align-content: start;
 }
 
-.points li {
-  position: relative;
-  padding-left: 26px;
+.feature-card {
+  padding: clamp(20px, 2.4vw, 28px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(242, 239, 230, 0.28);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.feature-card h3 {
+  margin: 0 0 8px;
+  font-family: var(--serif);
+  font-size: 1.28rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.feature-card p {
+  margin: 0;
   color: var(--paper-dim);
-  font-size: 1.02rem;
+  font-size: 0.94rem;
 }
 
-.points li::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0.5em;
-  width: 8px;
-  height: 8px;
-  background: var(--petal);
-  transform: rotate(45deg);
-}
+/* ---------- stack (card grid, "powered by") ---------- */
 
-.points strong {
-  color: var(--paper);
-  font-weight: 600;
-}
-
-/* ---------- stack ---------- */
-
-.stack {
+.stack-grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--line);
-}
-
-.stack__row {
   display: grid;
-  grid-template-columns: clamp(160px, 24vw, 280px) 1fr;
-  gap: clamp(16px, 4vw, 48px);
-  padding: clamp(18px, 2.4vw, 28px) 8px;
-  border-bottom: 1px solid var(--line);
-  transition: background 0.16s ease;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
-.stack__row:hover {
+.stack-card {
+  padding: clamp(20px, 2.4vw, 26px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.stack-card:hover {
+  border-color: rgba(242, 239, 230, 0.28);
   background: rgba(255, 255, 255, 0.02);
 }
 
-.stack__name {
-  align-self: center;
+.stack-card__name {
+  display: block;
+  margin-bottom: 10px;
   font-family: var(--mono-geist);
   font-size: 0.82rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--paper);
-  transition: color 0.16s ease;
-}
-
-.stack__row:hover .stack__name {
   color: var(--petal);
 }
 
-.stack__desc {
-  align-self: center;
-  max-width: 62ch;
+.stack-card__desc {
+  margin: 0;
   color: var(--paper-dim);
+  font-size: 0.94rem;
+}
+
+/* ---------- closing CTA ---------- */
+
+.cta {
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: #100e17;
+}
+
+.cta__bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.cta__content {
+  position: relative;
+  z-index: 1;
+  padding: clamp(96px, 14vh, 156px) var(--gutter);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.cta__content .kicker {
+  color: var(--petal);
+}
+
+.cta__title {
+  margin: 0 0 18px;
+  font-family: var(--serif);
+  font-size: clamp(2.4rem, 6vw, 4.2rem);
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+}
+
+.cta__body {
+  margin: 0 0 34px;
+  max-width: 46ch;
+  font-family: var(--serif);
+  font-size: clamp(1.1rem, 1.8vw, 1.3rem);
+  line-height: 1.45;
+  color: var(--paper-dim);
+}
+
+.cta .cta-row {
+  justify-content: center;
+  margin-bottom: 28px;
 }
 
 /* ---------- architecture diagram ----------
@@ -970,19 +1127,23 @@ h1 {
 
 @media (max-width: 780px) {
   .grid-2,
-  .steps {
+  .bento,
+  .feature-grid,
+  .stack-grid {
     grid-template-columns: 1fr;
+  }
+
+  .bento__card--big {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .section__title {
     max-width: none;
   }
 
-  .stack__row {
-    grid-template-columns: 1fr;
-    gap: 6px;
-    padding-left: 0;
-    padding-right: 0;
+  .proof__row {
+    justify-content: flex-start;
   }
 
   .hero__content {

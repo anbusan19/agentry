@@ -1,26 +1,54 @@
 import { ArchitectureDiagram } from "@/components/ArchitectureDiagram";
 import { Scene } from "@/components/SylvaScene";
+import FloatingLines from "@/components/FloatingLines";
+import GhostFibers from "@/components/GhostFibers";
+import Strands from "@/components/Strands";
 
-const STEPS = [
+const STOREFRONTS = [
+  { id: "zepto", label: "Zepto", src: "/zepto.png" },
+  { id: "blinkit", label: "Blinkit", src: "/blinkit.png" },
+];
+
+const FEATURES = [
   {
     n: "01",
-    title: "Plan",
-    body: "Give it a goal in plain language — “restock the pantry.” The agent breaks it into a concrete cart: quantities, substitutes, budget.",
+    title: "Plans the order",
+    body: "Hand it a goal in plain language — “restock the pantry.” It turns that into a real cart: quantities, substitutes, a budget it won’t blow past.",
+    big: true,
   },
   {
     n: "02",
-    title: "Shop",
-    body: "It opens a real quick-commerce storefront and drives it with stealth browser automation — search, compare, add to cart, handle the DOM as it changes.",
+    title: "Shops for real",
+    body: "No sandbox, no mock checkout. It opens an actual quick-commerce storefront and drives it end to end, DOM changes and all.",
   },
   {
     n: "03",
-    title: "Pay",
-    body: "Checkout is settled from the storefront’s own platform wallet balance (e.g. Zepto Cash). No cards handed around, no blockchain — just the wallet that’s already there.",
+    title: "Pays like you would",
+    body: "Checkout settles from the storefront’s own wallet balance. No cards handed around, nothing on-chain — just the money that’s already there.",
   },
   {
     n: "04",
-    title: "Check in",
-    body: "It only interrupts you on Telegram when a real decision is needed — an out-of-stock staple, a price past your ceiling. Otherwise the order just lands.",
+    title: "Speaks up only when it matters",
+    body: "One Telegram thread, saved for the moments a person actually has to decide — an out-of-stock staple, a price past the ceiling.",
+  },
+];
+
+const DIFFERENTIATORS = [
+  {
+    title: "Real storefront, not a mock",
+    body: "It automates an actual quick-commerce site — selectors, stock, prices, all of it live.",
+  },
+  {
+    title: "Platform-wallet checkout",
+    body: "Pays from the storefront’s native balance. No card entry, no x402, no chain.",
+  },
+  {
+    title: "A budget for interruptions",
+    body: "One Telegram thread, spent only on genuine decisions — never step-by-step narration.",
+  },
+  {
+    title: "Genuine Strands",
+    body: "Agent, tools, model providers and hooks — a real orchestration layer, not a wrapper over an API call.",
   },
 ];
 
@@ -75,53 +103,86 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="section" id="how">
-        <div className="wrap">
-          <p className="kicker">01 &middot; Flow</p>
-          <h2 className="section__title">Four moves, one goal</h2>
-          <p className="section__intro">
-            The whole run is autonomous. You set the intent once and read a Telegram
-            message at the end &mdash; or in the middle, if something needs you.
-          </p>
-          <ol className="steps">
-            {STEPS.map((s) => (
-              <li className="step" key={s.n}>
-                <span className="step__n">{s.n}</span>
-                <h3 className="step__title">{s.title}</h3>
-                <p className="step__body">{s.body}</p>
+      <section className="proof">
+        <div className="wrap proof__row">
+          <span className="proof__label">Runs on the storefronts already on your phone</span>
+          <ul className="proof__logos">
+            {STOREFRONTS.map((s) => (
+              <li key={s.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- static local brand mark, no next/image needed */}
+                <img src={s.src} alt={s.label} />
+                {s.label}
               </li>
             ))}
-          </ol>
+          </ul>
+        </div>
+      </section>
+
+      <section className="section feature-section" id="how">
+        <div className="feature-section__bg" aria-hidden="true">
+          <FloatingLines
+            enabledWaves={["middle"]}
+            lineCount={[10]}
+            lineDistance={[7]}
+            linesGradient={["#f6dde2", "#d9c7f2", "#6f7563"]}
+            topWavePosition={undefined}
+            middleWavePosition={undefined}
+            interactive={false}
+            parallax={false}
+            animationSpeed={0.5}
+            mixBlendMode="screen"
+          />
+        </div>
+        <div className="wrap">
+          <p className="kicker">Product</p>
+          <h2 className="section__title">Everything a pantry run needs, done for you</h2>
+          <p className="section__intro">
+            One goal in, one order out. Agentry plans, shops, pays and reports back —
+            you only hear from it when it counts.
+          </p>
+          <ul className="bento">
+            {FEATURES.map((f) => (
+              <li className={`bento__card${f.big ? " bento__card--big" : ""}`} key={f.n}>
+                <span className="bento__n">{f.n}</span>
+                <h3 className="bento__title">{f.title}</h3>
+                <p className="bento__body">{f.body}</p>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
       <section className="section section--alt" id="different">
-        <div className="wrap grid-2">
-          <div>
-            <p className="kicker">02 &middot; Design</p>
+        <div className="wrap grid-2 different">
+          <div className="different__lead">
+            <p className="kicker">Why it&rsquo;s different</p>
             <h2 className="section__title">Built to stay out of your way</h2>
             <p className="section__intro">
               Most &ldquo;assistants&rdquo; ask you to confirm every step. Agentry inverts that:
               it acts, and saves the interruption for the one moment it matters.
             </p>
+            <div className="different__visual" aria-hidden="true">
+              <Strands
+                colors={["#f6dde2", "#d9c7f2", "#6f7563"]}
+                count={3}
+                speed={0.4}
+                amplitude={0.9}
+                thickness={0.6}
+                glow={2.2}
+                intensity={0.55}
+                saturation={1.2}
+                scale={1.7}
+                style={{ width: "100%", height: "100%" }}
+              />
+            </div>
           </div>
-          <ul className="points">
-            <li>
-              <strong>Real storefront, not a mock.</strong> It automates an actual
-              quick-commerce site, selectors and all.
-            </li>
-            <li>
-              <strong>Platform-wallet checkout.</strong> Pays from the storefront&rsquo;s
-              native balance &mdash; no card entry, no x402, no chain.
-            </li>
-            <li>
-              <strong>Interrupt budget.</strong> One Telegram thread, used only for
-              genuine decisions.
-            </li>
-            <li>
-              <strong>Genuine Strands.</strong> Agent, tools, model providers and hooks &mdash;
-              not a thin wrapper over an API call.
-            </li>
+          <ul className="feature-grid">
+            {DIFFERENTIATORS.map((d) => (
+              <li className="feature-card" key={d.title}>
+                <h3>{d.title}</h3>
+                <p>{d.body}</p>
+              </li>
+            ))}
           </ul>
         </div>
       </section>
@@ -141,31 +202,81 @@ export default function Home() {
 
       <section className="section" id="stack">
         <div className="wrap">
-          <p className="kicker">04 &middot; Stack</p>
+          <p className="kicker">Under the hood</p>
           <h2 className="section__title">What it&rsquo;s made of</h2>
-          <ul className="stack">
+          <p className="section__intro">
+            No proprietary glue &mdash; a small stack of tools doing exactly what
+            they&rsquo;re good at.
+          </p>
+          <ul className="stack-grid">
             {STACK.map(([name, desc]) => (
-              <li className="stack__row" key={name}>
-                <span className="stack__name">{name}</span>
-                <span className="stack__desc">{desc}</span>
+              <li className="stack-card" key={name}>
+                <span className="stack-card__name">{name}</span>
+                <p className="stack-card__desc">{desc}</p>
               </li>
             ))}
           </ul>
         </div>
       </section>
 
+      <section className="cta">
+        <div className="cta__bg" aria-hidden="true">
+          <GhostFibers
+            lineColor="#2b2e28"
+            glowColor="#6f7563"
+            speed={0.18}
+            scale={2.1}
+            layers={4}
+            brightness={1.7}
+            blueBoost={0.9}
+            vignette={0.85}
+            grain={0.04}
+          />
+        </div>
+        <div className="wrap cta__content">
+          <p className="kicker">Get started</p>
+          <h2 className="cta__title">Stop restocking it yourself.</h2>
+          <p className="cta__body">
+            Clone the repo, point it at a storefront login, and give it a goal.
+            The next pantry run is on it.
+          </p>
+          <div className="cta-row">
+            <a className="btn btn--primary" href="https://github.com/anbusan19/agentry">
+              View the repo
+            </a>
+            <a className="btn btn--ghost" href="/console">
+              Open the console
+            </a>
+          </div>
+          <div className="prompt-chip">
+            <span className="prompt-chip__dollar">$</span>
+            <span className="prompt-chip__cmd">python main.py --goal &quot;restock the pantry&quot;</span>
+          </div>
+        </div>
+      </section>
+
       <footer className="footer">
-        <div className="wrap">
-          <p className="footer__disclosure">
-            <strong>Disclosure.</strong> The product concept and the Playwright automation
-            approach come from a pre-existing project (Zepto402 &rarr; Pantry &rarr; Agentry).
-            The agent-orchestration layer was rebuilt from scratch on the Strands Agents SDK
-            for this hackathon submission.
-          </p>
-          <p className="footer__meta">
-            MIT licensed &middot; Background scene: <code>SylvaLivingWorldScene</code> (Living
-            Green) from ThreeUI.
-          </p>
+        <div className="wrap footer__grid">
+          <div>
+            <p className="footer__disclosure">
+              <strong>Disclosure.</strong> The product concept and the Playwright automation
+              approach come from a pre-existing project (Zepto402 &rarr; Pantry &rarr; Agentry).
+              The agent-orchestration layer was rebuilt from scratch on the Strands Agents SDK
+              for this hackathon submission.
+            </p>
+            <p className="footer__meta">
+              MIT licensed &middot; Background scene: <code>SylvaLivingWorldScene</code> (Living
+              Green) from ThreeUI.
+            </p>
+          </div>
+          <nav className="footer__links" aria-label="Footer">
+            <a href="#how">How it works</a>
+            <a href="#different">Approach</a>
+            <a href="#stack">Stack</a>
+            <a href="#architecture">Architecture</a>
+            <a href="/console">Console</a>
+            <a href="https://github.com/anbusan19/agentry">GitHub</a>
+          </nav>
         </div>
       </footer>
     </main>
