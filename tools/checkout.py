@@ -181,7 +181,12 @@ def _reach_blinkit_payment_screen(page, storefront_url: str) -> Optional[dict]:
 
     page.goto(f"{storefront_url}/checkout", wait_until="domcontentloaded", timeout=40000)
     try:
-        page.wait_for_selector("text=/select payment method/i", timeout=8000)
+        # Short timeout: a direct /checkout hit without an active checkout
+        # session (i.e. without having actually clicked through from the
+        # cart) may just redirect away rather than load the screen at all,
+        # so this either succeeds fast or is expected to fail — no reason
+        # to wait as long as the real click-driven wait below does.
+        page.wait_for_selector("text=/select payment method/i", timeout=4000)
         return None
     except Exception:
         pass
@@ -192,8 +197,12 @@ def _reach_blinkit_payment_screen(page, storefront_url: str) -> Optional[dict]:
     if "/cart" not in page.url:
         page.goto(f"{storefront_url}/cart", wait_until="domcontentloaded", timeout=40000)
         page.wait_for_timeout(1000)
-    if not js_click(page, r"proceed to pay|click to pay|place order"):
-        return {"status": "error", "error": "Could not find the 'Proceed To Pay' button on the cart."}
+    # "Proceed To Pay" is the drawer's label (see the cart-icon-click
+    # screenshot); view_cart.py's own docstring notes the standalone /cart
+    # page instead ends its bill section with a bare "Proceed" — no "To
+    # Pay" suffix. Match both rather than assuming one.
+    if not js_click(page, r"proceed to pay|^proceed$|click to pay|place order"):
+        return {"status": "error", "error": "Could not find the 'Proceed'/'Proceed To Pay' button on the cart."}
 
     try:
         page.wait_for_selector("text=/select payment method/i", timeout=15000)
