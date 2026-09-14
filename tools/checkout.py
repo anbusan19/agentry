@@ -22,11 +22,16 @@ short of it deliberately. Verify this against a real cart with a small
 order before trusting it unattended.
 
 Blinkit is a genuinely different shape, confirmed live via screenshots of
-the real "Select Payment Method" screen: Wallets, "Add credit or debit
-cards", Netbanking, UPI, Cash (disabled between 12 AM and 6 AM), and Pay
-Later — no Blinkit Money anywhere on it. Blinkit Money is app-exclusive;
-there is no automated way to pay from it on web, full stop, so checkout()
-takes a payment_method argument for Blinkit instead of assuming a wallet:
+the real flow: the cart drawer (opened from the cart icon on blinkit.com,
+not a separate page) shows a "Proceed To Pay" button with the grand total;
+clicking it navigates straight to blinkit.com/checkout, which shows
+"Select Payment Method" directly — no separate delivery-slot-scheduling
+step the way Zepto has one. That screen offers Wallets, "Add credit or
+debit cards", Netbanking, UPI, Cash (disabled between 12 AM and 6 AM), and
+Pay Later — no Blinkit Money anywhere on it. Blinkit Money is
+app-exclusive; there is no automated way to pay from it on web, full stop,
+so checkout() takes a payment_method argument for Blinkit instead of
+assuming a wallet:
 
   - payment_method="blinkit_money" (default, for parity with Zepto's
     wallet-first flow): doesn't attempt payment at all — it can't be paid
@@ -57,6 +62,7 @@ touches a Page.
 import re
 import time
 from pathlib import Path
+from typing import Optional
 
 from strands import tool
 
@@ -123,14 +129,14 @@ def _checkout_impl(confirm: bool, platform: str, payment_method: str) -> dict:
     storefront_url = PLATFORMS[platform]["url"]
     page = get_page(platform)
     try:
-        if platform == "zepto":
-            page.goto(f"{storefront_url}?cart=open", wait_until="domcontentloaded", timeout=40000)
-            page.wait_for_selector("text=Bill Summary", timeout=10000)
-        else:
-            # Blinkit: /cart is directly navigable, confirmed live (see
-            # view_cart.py).
-            page.goto(f"{storefront_url}/cart", wait_until="domcontentloaded", timeout=40000)
-            page.wait_for_timeout(1200)
+        if platform == "blinkit":
+            reached = _reach_blinkit_payment_screen(page, storefront_url)
+            if reached is not None:  # None = reached fine; a dict here is an early error/empty-cart result
+                return reached
+            return _pay_blinkit(page, payment_method)
+
+        page.goto(f"{storefront_url}?cart=open", wait_until="domcontentloaded", timeout=40000)
+        page.wait_for_selector("text=Bill Summary", timeout=10000)
 
         js_click(page, "select delivery options|schedule delivery")
         page.wait_for_timeout(1500)
@@ -143,12 +149,60 @@ def _checkout_impl(confirm: bool, platform: str, payment_method: str) -> dict:
         js_click(page, r"click to pay|proceed to pay|place order")
         page.wait_for_timeout(2000)
 
-        if platform == "blinkit":
-            return _pay_blinkit(page, payment_method)
-
         return _pay_and_place_zepto(page, platform)
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
+
+
+def _reach_blinkit_payment_screen(page, storefront_url: str) -> Optional[dict]:
+    """Get from wherever the page currently is to Blinkit's "Select Payment
+    Method" screen, confirmed live via screenshots of the real flow: the
+    cart drawer's "Proceed To Pay" button navigates straight to
+    blinkit.com/checkout with no delivery-slot step in between. Two paths,
+    in order:
+
+      1. Direct navigation to /checkout — the simpler, more robust option
+         if the site's router treats it as a real deep link (same reasoning
+         view_cart.py already relies on for /cart being directly
+         navigable). Confirmed to land on the right screen by checking for
+         the actual "Select Payment Method" heading, not just a fixed wait.
+      2. If that doesn't land on the payment screen (e.g. /checkout
+         redirects back to /cart without a "Proceed To Pay" click having
+         happened first), fall back to opening /cart and clicking the real
+         button.
+
+    Returns None once the payment screen is confirmed visible — the caller
+    proceeds to _pay_blinkit(). Returns a result dict directly (empty cart,
+    or neither path reaching the screen) when checkout should stop here."""
+    page.goto(f"{storefront_url}/cart", wait_until="domcontentloaded", timeout=40000)
+    page.wait_for_timeout(1200)
+    if page.locator("text=/cart is empty|add items to your cart/i").is_visible():
+        return {"status": "error", "error": "Cart is empty — nothing to check out."}
+
+    page.goto(f"{storefront_url}/checkout", wait_until="domcontentloaded", timeout=40000)
+    try:
+        page.wait_for_selector("text=/select payment method/i", timeout=8000)
+        return None
+    except Exception:
+        pass
+
+    # Fallback: click through from the cart instead of trusting the direct
+    # URL. Went back to /cart above already if the direct nav bounced us
+    # somewhere else, so re-open it explicitly in case it didn't.
+    if "/cart" not in page.url:
+        page.goto(f"{storefront_url}/cart", wait_until="domcontentloaded", timeout=40000)
+        page.wait_for_timeout(1000)
+    if not js_click(page, r"proceed to pay|click to pay|place order"):
+        return {"status": "error", "error": "Could not find the 'Proceed To Pay' button on the cart."}
+
+    try:
+        page.wait_for_selector("text=/select payment method/i", timeout=15000)
+    except Exception:
+        return {
+            "status": "error",
+            "error": f"Payment screen never loaded after 'Proceed To Pay'. Current URL: {page.url}",
+        }
+    return None
 
 
 def _pay_and_place_zepto(page, platform: str) -> dict:
@@ -217,7 +271,9 @@ def _pay_blinkit(page, payment_method: str) -> dict:
     cards, Netbanking, UPI, Cash, Pay Later — no Blinkit Money. Only UPI is
     an actually-automatable path, and even that ends at "show the user a
     QR code" rather than placing the order, since scanning it requires a
-    human's own banking app."""
+    human's own banking app. Caller (_reach_blinkit_payment_screen) has
+    already confirmed the "Select Payment Method" screen is up before this
+    runs."""
     if payment_method != "upi":
         # "blinkit_money" (or anything else): there's nothing to select —
         # Blinkit Money doesn't appear on this screen at all. Don't guess
@@ -233,19 +289,24 @@ def _pay_blinkit(page, payment_method: str) -> dict:
             ),
         }
 
-    if not page.locator("text=/^wallets$/i").is_visible():
-        return {"status": "error", "error": "Payment method screen did not load as expected — no 'Wallets' section found."}
-
     if not js_click(page, r"^upi$"):
         return {"status": "error", "error": "Could not find or open the UPI section on the payment screen."}
-    page.wait_for_timeout(800)
+    try:
+        page.wait_for_selector("text=/scan qr to pay/i", timeout=8000)
+    except Exception:
+        return {"status": "error", "error": "UPI section did not open after clicking it."}
 
     if not js_click(page, r"generate qr"):
         return {"status": "error", "error": "Could not find the 'Generate QR' button under UPI."}
 
     try:
-        page.wait_for_selector("text=/scan qr to pay/i", timeout=8000)
-        page.wait_for_timeout(1500)  # let the QR image itself finish rendering
+        # "Scan QR to pay" is already on screen before the QR itself exists
+        # (it labels the Generate QR button's placeholder too — confirmed
+        # live) — "Approve payment within" only appears once a real QR has
+        # been generated, so that's the actual ready signal, not the
+        # heading.
+        page.wait_for_selector("text=/approve payment within/i", timeout=10000)
+        page.wait_for_timeout(500)  # let the QR image itself finish rendering
     except Exception:
         return {"status": "error", "error": "UPI QR code did not appear after clicking 'Generate QR'."}
 
@@ -265,7 +326,7 @@ def _pay_blinkit(page, payment_method: str) -> dict:
         # element locator (untested live) — the panel is small and the QR
         # is the visually dominant thing in it, so this is legible even if
         # the exact bounding box is generous.
-        panel = page.locator("text=/scan qr to pay/i").locator("xpath=ancestor::div[3]")
+        panel = page.locator("text=/approve payment within/i").locator("xpath=ancestor::div[3]")
         (panel if panel.count() else page).screenshot(path=str(qr_path))
     except Exception:
         page.screenshot(path=str(qr_path))  # fall back to a full-viewport shot
