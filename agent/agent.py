@@ -40,6 +40,24 @@ from tools.view_cart import view_cart
 # outright — no extra model calls, unlike a summarizing manager.
 DEFAULT_CONVERSATION_WINDOW_SIZE = 30
 
+# Shared by build_agent() (text, below) and voice/bidi_voice.py (Nova Sonic
+# real-time voice) — both need the exact same tool set, and duplicating the
+# list risks the two silently drifting apart as tools are added.
+AGENTRY_TOOLS = [
+    get_restock_suggestions,
+    query_purchase_history,
+    search_products,
+    add_to_cart,
+    remove_from_cart,
+    view_cart,
+    manage_address,
+    check_budget,
+    check_wallet_balance,
+    checkout,
+    record_purchase,
+    notify_user,
+]
+
 
 def _build_model():
     """Pick the model provider from settings (the Settings page's toggle,
@@ -47,6 +65,25 @@ def _build_model():
     credentials via boto3's normal resolution chain (env vars, a named
     profile, or an IAM role) — nothing AWS-specific is read directly here."""
     provider = get_settings()["model_provider"]
+
+    if provider == "groq":
+        # Groq's API is OpenAI-Chat-Completions-compatible, so it's the same
+        # Strands OpenAIModel as Mantle above — just pointed at Groq's base
+        # URL with a plain API key instead of a minted AWS bearer token.
+        # Model id comes from settings (composer selector, seeded from
+        # GROQ_MODEL).
+        from strands.models.openai import OpenAIModel
+
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not set — copy .env.example to .env and fill it in."
+            )
+        model_id = get_settings().get("groq_model") or "openai/gpt-oss-120b"
+        return OpenAIModel(
+            client_args={"base_url": "https://api.groq.com/openai/v1", "api_key": api_key},
+            model_id=model_id,
+        )
 
     if provider == "bedrock-mantle":
         # Bedrock's OpenAI-compatible Mantle endpoint, via Strands'
@@ -68,7 +105,9 @@ def _build_model():
         )
 
     if provider != "gemini":
-        raise RuntimeError(f'Unknown MODEL_PROVIDER {provider!r} — use "gemini" or "bedrock-mantle".')
+        raise RuntimeError(
+            f'Unknown MODEL_PROVIDER {provider!r} — use "gemini", "bedrock-mantle", or "groq".'
+        )
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -95,18 +134,5 @@ def build_agent() -> Agent:
         model=_build_model(),
         system_prompt=SYSTEM_PROMPT,
         conversation_manager=SlidingWindowConversationManager(window_size=window_size),
-        tools=[
-            get_restock_suggestions,
-            query_purchase_history,
-            search_products,
-            add_to_cart,
-            remove_from_cart,
-            view_cart,
-            manage_address,
-            check_budget,
-            check_wallet_balance,
-            checkout,
-            record_purchase,
-            notify_user,
-        ],
+        tools=AGENTRY_TOOLS,
     )

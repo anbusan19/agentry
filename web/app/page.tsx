@@ -103,21 +103,6 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="proof">
-        <div className="wrap proof__row">
-          <span className="proof__label">Runs on the storefronts already on your phone</span>
-          <ul className="proof__logos">
-            {STOREFRONTS.map((s) => (
-              <li key={s.id}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- static local brand mark, no next/image needed */}
-                <img src={s.src} alt={s.label} />
-                {s.label}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
       <section className="section feature-section" id="how">
         <div className="feature-section__bg" aria-hidden="true">
           <FloatingLines

@@ -25,12 +25,15 @@ from typing import Any, Optional
 
 import networkx as nx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agent.agent import build_agent
+from agent.turn_extract import extract_cart as _extract_cart
+from agent.turn_extract import extract_checkout as _extract_checkout
+from agent.turn_extract import extract_search_batches as _extract_search_batches
 from knowledge.budget import spent_within
 from knowledge.graph import last_purchased, load_graph, node_platforms, restock_suggestions
 from knowledge.settings import get_settings, update_settings
@@ -202,84 +205,6 @@ class ChatReply(BaseModel):
     checkout: Optional[CheckoutInfo] = None
 
 
-def _extract_search_batches(messages: list[dict[str, Any]]) -> list[dict]:
-    """Pull out every search_products call's results from this turn's new
-    messages, so the console can render them as tiles instead of the model
-    having to retype a product list as prose. Strands records each tool
-    call as a {toolUse} block (name + input) and its outcome as a matching
-    {toolResult} block (linked by toolUseId) in the following message."""
-    tool_calls: dict[str, dict] = {}
-    batches = []
-
-    for msg in messages:
-        for block in msg.get("content", []):
-            if "toolUse" in block:
-                tu = block["toolUse"]
-                tool_calls[tu["toolUseId"]] = tu
-            elif "toolResult" in block:
-                tr = block["toolResult"]
-                call = tool_calls.get(tr.get("toolUseId"))
-                if not call or call.get("name") != "search_products" or tr.get("status") != "success":
-                    continue
-                for c in tr.get("content", []):
-                    text = c.get("text")
-                    if not text:
-                        continue
-                    try:
-                        data = json.loads(text)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-                    if data.get("status") == "ok" and data.get("results"):
-                        batches.append(
-                            {"query": call.get("input", {}).get("query", ""), "results": data["results"]}
-                        )
-    return batches
-
-
-def _last_tool_result(messages: list[dict[str, Any]], tool_name: str) -> Optional[dict]:
-    """The most recent parsed toolResult for `tool_name` in this turn's new
-    messages, or None. Same {toolUse}/{toolResult} pairing as
-    _extract_search_batches, but we only care about the last call's payload
-    (a turn that re-checks the cart should show the latest state)."""
-    calls: dict[str, dict] = {}
-    latest: Optional[dict] = None
-
-    for msg in messages:
-        for block in msg.get("content", []):
-            if "toolUse" in block:
-                tu = block["toolUse"]
-                calls[tu["toolUseId"]] = tu
-            elif "toolResult" in block:
-                tr = block["toolResult"]
-                call = calls.get(tr.get("toolUseId"))
-                if not call or call.get("name") != tool_name:
-                    continue
-                for c in tr.get("content", []):
-                    text = c.get("text")
-                    if not text:
-                        continue
-                    try:
-                        latest = json.loads(text)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-    return latest
-
-
-def _extract_cart(messages: list[dict[str, Any]]) -> Optional[dict]:
-    data = _last_tool_result(messages, "view_cart")
-    if data and data.get("status") == "ok" and data.get("items"):
-        return {"items": data["items"], "total": data.get("total")}
-    return None
-
-
-def _extract_checkout(messages: list[dict[str, Any]]) -> Optional[dict]:
-    data = _last_tool_result(messages, "checkout")
-    if not data or not data.get("status"):
-        return None
-    keep = ("status", "amount_paid", "order_id", "note", "error")
-    return {k: data[k] for k in keep if data.get(k) is not None}
-
-
 _RETRY_RE = re.compile(r"retry(?:delay)?[\"\s:]+(\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
 
 # Some "thinking" models (confirmed live: moonshotai.kimi-k2-thinking via
@@ -427,6 +352,39 @@ async def voice_health():
         "tts_engine": tts,
         "ready": stt_ready() and tts != "none",
     }
+
+
+@app.get("/api/voice/bidi/health")
+async def voice_bidi_health():
+    """Whether the real-time Nova Sonic voice path (/ws/voice) can run —
+    separate readiness check from /api/voice/health above, since this path
+    doesn't touch local STT/TTS at all, only AWS credentials and Bedrock
+    model access. Cheap and read-only: lists nothing, invokes nothing,
+    just confirms amazon.nova-2-sonic-v1:0 is reachable and ACTIVE for
+    whatever credentials this process has."""
+    try:
+        import boto3
+
+        client = boto3.client("bedrock", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        detail = await run_in_threadpool(
+            lambda: client.get_foundation_model(modelIdentifier="amazon.nova-2-sonic-v1:0")["modelDetails"]
+        )
+        status = detail.get("modelLifecycle", {}).get("status")
+        return {"ready": status == "ACTIVE", "model_status": status}
+    except Exception as exc:
+        return {"ready": False, "error": str(exc)}
+
+
+@app.websocket("/ws/voice")
+async def voice_bidi(websocket: WebSocket) -> None:
+    """Real-time voice mode: a persistent duplex connection streaming raw
+    PCM audio both ways through Amazon Nova 2 Sonic, via Strands'
+    BidiAgent — see voice/bidi_voice.py for the wire format and the full
+    rationale. Separate from POST /api/voice above, which is the
+    record-a-clip -> local Whisper -> text agent -> local TTS path."""
+    from voice.bidi_voice import run_voice_session
+
+    await run_voice_session(websocket)
 
 
 @app.get("/api/graph")

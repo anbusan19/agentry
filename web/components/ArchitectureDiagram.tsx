@@ -130,9 +130,35 @@ const LINKS = {
   storeMemory: "M1160 447 L1240 447",
 };
 
+const ARCH_STAGE_WIDTH = 1564;
+const ARCH_STAGE_HEIGHT = 872;
+const ARCH_MIN_SCALE = 0.32;
+
 export function ArchitectureDiagram() {
   const ref = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  // Computed from the actual container width via ResizeObserver, applied
+  // as an inline transform below. This used to be a CSS container-query
+  // custom property (--arch-s, read by a `transform: scale(var(--arch-s))`
+  // rule), which measured correctly (confirmed live: the custom property's
+  // resolved value was right) but the transform it drove never actually
+  // applied — the diagram rendered at its full 1564px width regardless of
+  // container size, cut off at both edges on every viewport tested. Rather
+  // than keep chasing which of several overlapping stylesheet rules was
+  // winning the cascade, doing the scaling in JS and setting it as an
+  // inline style sidesteps that ambiguity entirely — inline style wins
+  // over any stylesheet rule, full stop.
+  const [scale, setScale] = useState(1);
+  // Whether the 0.32 floor above is actually clamping the diagram wider
+  // than the container fits — the only case that should scroll. Driven
+  // separately from `scale` (rather than just checking scale ===
+  // ARCH_MIN_SCALE) because transform: scale() doesn't shrink what
+  // overflow: auto considers the scrollable area — a fully-fit diagram
+  // still reports its full unscaled 1564px as scrollWidth, so leaving
+  // overflow-x: auto on unconditionally showed a scrollbar / let you
+  // scroll into empty space even when nothing was actually cut off.
+  const [needsScroll, setNeedsScroll] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -153,6 +179,23 @@ export function ArchitectureDiagram() {
     return () => obs.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === "undefined") {
+      setScale(1);
+      return;
+    }
+    const ro = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      const fit = Number.isFinite(width) ? width / ARCH_STAGE_WIDTH : 1;
+      setScale(Math.max(ARCH_MIN_SCALE, Math.min(1, fit)));
+      setNeedsScroll(fit < ARCH_MIN_SCALE);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <figure className="arch">
       <div className="arch__head">
@@ -160,11 +203,16 @@ export function ArchitectureDiagram() {
         <span className="arch__head-label">Agent workflow</span>
       </div>
 
-      <div className="arch__scroll">
+      <div
+        className="arch__scroll"
+        ref={scrollRef}
+        style={{ height: ARCH_STAGE_HEIGHT * scale, overflowX: needsScroll ? "auto" : "hidden" }}
+      >
         <div
           ref={ref}
           className="arch__stage"
           data-visible={visible ? "true" : "false"}
+          style={{ transform: `scale(${scale})` }}
         >
           {/* AWS runtime — the outline container around every node */}
           <div className="arch__enclosure">

@@ -6,6 +6,8 @@ import type { ProductBatch } from "@/components/ProductTiles";
 import type { Cart, CheckoutInfo } from "@/components/PaymentCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// http(s) -> ws(s), same host/port as the REST API.
+const WS_VOICE_URL = `${API_BASE.replace(/^http/, "ws")}/ws/voice`;
 
 export interface VoiceExchange {
   transcript: string;
@@ -15,35 +17,72 @@ export interface VoiceExchange {
   checkout?: CheckoutInfo | null;
 }
 
-// Hands-free call tuning. RMS is 0..1 over the analyser's time-domain frame.
-const SPEECH_ON = 0.025; // cross this -> you're talking
-const SPEECH_OFF = 0.018; // fall below this -> maybe done (hysteresis)
-const SILENCE_MS = 950; // quiet for this long after speech -> send the turn
-const MIN_SPEECH_MS = 350; // ignore coughs / clicks shorter than this
-const MAX_TURN_MS = 15000; // hard cap on one utterance
-const BARGE_ON = 0.05; // louder bar to interrupt the agent while it speaks
-const BARGE_FRAMES = 4; // consecutive loud frames before we count it
-
 type Phase = "idle" | "listening" | "capturing" | "thinking" | "speaking" | "error";
 type MicPermission = "unknown" | "prompt" | "granted" | "denied";
 
-function pickMimeType(): string {
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ];
-  return candidates.find((t) => window.MediaRecorder?.isTypeSupported?.(t)) ?? "";
+// Nova Sonic's fixed wire format (tools/_session.py-adjacent note: this is
+// the model's own requirement, not a choice made here — see
+// voice/bidi_voice.py's module docstring). Both capture and playback run
+// on one AudioContext opened at this rate, so no resampling is needed on
+// either side of the pipe.
+const SAMPLE_RATE = 16000;
+const CAPTURE_CHUNK_SAMPLES = 320; // 20ms @ 16kHz — small enough for low latency, big enough not to spam the socket
+
+// Inline AudioWorkletProcessor, loaded via a Blob URL rather than a static
+// file: keeps the whole capture pipeline in this one component instead of
+// wiring an extra asset through Next's public/ dir. Runs on the audio
+// render thread; batches Float32 samples into CAPTURE_CHUNK_SAMPLES-sized
+// frames, converts to PCM16LE, and posts each frame back to the main
+// thread as a transferable ArrayBuffer (no copy).
+const CAPTURE_WORKLET_SRC = `
+class PCMCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._buffer = [];
+  }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel) {
+      for (let i = 0; i < channel.length; i++) this._buffer.push(channel[i]);
+      while (this._buffer.length >= ${CAPTURE_CHUNK_SAMPLES}) {
+        const chunk = this._buffer.splice(0, ${CAPTURE_CHUNK_SAMPLES});
+        const pcm16 = new Int16Array(chunk.length);
+        for (let i = 0; i < chunk.length; i++) {
+          const s = Math.max(-1, Math.min(1, chunk[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("pcm-capture-processor", PCMCaptureProcessor);
+`;
+
+function pcm16BufferToAudioBuffer(ctx: AudioContext, data: ArrayBuffer): AudioBuffer {
+  const int16 = new Int16Array(data);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) {
+    const v = int16[i];
+    float32[i] = v / (v < 0 ? 0x8000 : 0x7fff);
+  }
+  const buffer = ctx.createBuffer(1, float32.length || 1, SAMPLE_RATE);
+  buffer.copyToChannel(float32, 0);
+  return buffer;
 }
 
 /**
- * Hands-free voice mode: a phone-call loop, not push-to-talk. One tap to
- * start the call (which also unlocks audio playback), then a client-side
- * energy VAD watches the mic — speech, then ~1s of quiet, sends the turn to
- * server.py's /api/voice; the spoken reply plays automatically and the mic
- * re-opens for the next turn. Talking over the agent interrupts it. "End
- * call" tears it all down.
+ * Real-time voice mode: a persistent WebSocket to server.py's /ws/voice,
+ * streaming raw PCM audio both ways through Amazon Nova 2 Sonic — see
+ * voice/bidi_voice.py for the wire format and the full rationale. Not a
+ * record-a-clip-then-upload flow like the old version: the mic streams
+ * continuously once the call starts, Nova Sonic does its own voice-activity
+ * turn detection server-side (no client-side VAD needed here anymore), and
+ * its audio reply streams back and plays as it arrives rather than waiting
+ * for a whole clip. Barge-in works the same way — interrupt the model by
+ * talking over it — but the *detection* now happens on Nova Sonic's side;
+ * the frontend's job on an interruption is just to stop playback fast.
  */
 export default function VoiceMode({
   onClose,
@@ -56,32 +95,27 @@ export default function VoiceMode({
   const [error, setError] = useState("");
   const [mic, setMic] = useState<MicPermission>("unknown");
   const [requesting, setRequesting] = useState(false);
-  const [replayReady, setReplayReady] = useState(false);
+  const [statusHint, setStatusHint] = useState("");
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const rafRef = useRef<number>(0);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
+  // Playback scheduling state — see scheduleAudio/stopPlayback below.
+  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const nextStartTimeRef = useRef(0);
 
-  // Loop state the rAF tick reads/writes without re-rendering.
+  // This turn's accumulated transcript, reset after each onExchange call.
+  const userTextRef = useRef("");
+  const replyTextRef = useRef("");
+
   const activeRef = useRef(false);
-  const modeRef = useRef<Phase>("idle");
-  const speechStartRef = useRef(0);
-  const lastVoiceRef = useRef(0);
-  const turnStartRef = useRef(0);
-  const bargeRef = useRef(0);
+  const onExchangeRef = useRef(onExchange);
+  onExchangeRef.current = onExchange;
 
-  const setMode = useCallback((m: Phase) => {
-    modeRef.current = m;
-    setPhase(m);
-  }, []);
-
-  // ---- permission gate -------------------------------------------------
+  // ---- permission gate (unchanged from the record-a-clip version) ------
 
   const insecure =
     typeof window !== "undefined" &&
@@ -142,197 +176,183 @@ export default function VoiceMode({
     }
   }
 
-  // ---- audio playback ------------------------------------------------------
+  // ---- playback: gapless streaming via back-to-back scheduled buffers --
 
-  const afterReply = useCallback(() => {
-    if (activeRef.current) beginListening();
-    else setMode("idle");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setMode]);
+  const scheduleAudio = useCallback((data: ArrayBuffer) => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const buffer = pcm16BufferToAudioBuffer(ctx, data);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    const startAt = Math.max(ctx.currentTime, nextStartTimeRef.current);
+    source.start(startAt);
+    nextStartTimeRef.current = startAt + buffer.duration;
+    activeSourcesRef.current.push(source);
+    source.onended = () => {
+      activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+    };
+  }, []);
 
-  const playReply = useCallback(
-    (b64: string, mime: string) => {
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: mime || "audio/wav" }));
-      audioUrlRef.current = url;
+  const stopPlayback = useCallback(() => {
+    activeSourcesRef.current.forEach((s) => {
+      try {
+        s.stop();
+      } catch {
+        /* already stopped */
+      }
+    });
+    activeSourcesRef.current = [];
+    if (ctxRef.current) nextStartTimeRef.current = ctxRef.current.currentTime;
+  }, []);
 
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onended = afterReply;
-      audio.onerror = () => {
-        setError("The reply audio could not be played.");
-        afterReply();
-      };
+  // ---- WebSocket event handling -----------------------------------------
 
-      setMode("speaking");
-      bargeRef.current = 0;
-      setReplayReady(false);
-      audio.play().catch(() => {
-        // Autoplay blocked (shouldn't happen after the Start-call tap) —
-        // stop the loop and let the user tap once to hear it.
-        activeRef.current = false;
-        setReplayReady(true);
-        setMode("idle");
-      });
+  const handleServerEvent = useCallback(
+    (payload: Record<string, unknown>) => {
+      switch (payload.type) {
+        case "transcript": {
+          const text = String(payload.text ?? "");
+          if (payload.role === "user") {
+            userTextRef.current = text;
+            if (!payload.is_final) setPhase("capturing");
+          } else {
+            replyTextRef.current = text;
+          }
+          return;
+        }
+        case "tool_use": {
+          setStatusHint(payload.name ? `Using ${payload.name}…` : "");
+          setPhase("thinking");
+          return;
+        }
+        case "response_start": {
+          setPhase("speaking");
+          setStatusHint("");
+          return;
+        }
+        case "interruption": {
+          // Nova Sonic detected the user talking over it — stop playback
+          // immediately, the model has already stopped generating.
+          stopPlayback();
+          setPhase("capturing");
+          return;
+        }
+        case "response_complete": {
+          setPhase(activeRef.current ? "listening" : "idle");
+          setStatusHint("");
+          if (userTextRef.current || replyTextRef.current) {
+            onExchangeRef.current?.({
+              transcript: userTextRef.current,
+              reply: replyTextRef.current,
+            });
+            userTextRef.current = "";
+            replyTextRef.current = "";
+          }
+          return;
+        }
+        case "turn_data": {
+          // Arrives just before response_complete (see bidi_voice.py) —
+          // fold it into the same onExchange call rather than firing a
+          // second, partial one.
+          onExchangeRef.current?.({
+            transcript: userTextRef.current,
+            reply: replyTextRef.current,
+            products: (payload.products as ProductBatch[]) ?? [],
+            cart: (payload.cart as Cart | null) ?? null,
+            checkout: (payload.checkout as CheckoutInfo | null) ?? null,
+          });
+          userTextRef.current = "";
+          replyTextRef.current = "";
+          return;
+        }
+        case "connection_restart": {
+          setStatusHint("Reconnecting…");
+          return;
+        }
+        case "connection_close": {
+          endCall();
+          return;
+        }
+        case "error": {
+          setError(String(payload.message ?? "The voice session hit an error."));
+          endCall();
+          return;
+        }
+        default:
+          return;
+      }
     },
-    [afterReply, setMode]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stopPlayback]
   );
 
-  function replay() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = 0;
-    setReplayReady(false);
-    audio.play().catch(() => setReplayReady(true));
-  }
-
-  // ---- the call loop -----------------------------------------------------
-
-  function beginListening() {
-    if (!activeRef.current || !streamRef.current) return;
-    setError("");
-    chunksRef.current = [];
-    const mimeType = pickMimeType();
-    const rec = new MediaRecorder(
-      streamRef.current,
-      mimeType ? { mimeType } : undefined
-    );
-    rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
-    rec.onstop = handleTurnStop;
-    rec.start();
-    recorderRef.current = rec;
-
-    speechStartRef.current = 0;
-    lastVoiceRef.current = performance.now();
-    turnStartRef.current = performance.now();
-    setMode("listening");
-  }
-
-  function endTurn() {
-    setMode("thinking");
-    try {
-      recorderRef.current?.stop(); // -> handleTurnStop
-    } catch {
-      beginListening();
-    }
-  }
-
-  function handleTurnStop() {
-    const rec = recorderRef.current;
-    const blob = new Blob(chunksRef.current, { type: rec?.mimeType || "audio/webm" });
-    if (!activeRef.current) return;
-    if (blob.size < 1400) {
-      beginListening(); // nothing really said
-      return;
-    }
-    upload(blob);
-  }
-
-  async function upload(blob: Blob) {
-    setMode("thinking");
-    try {
-      const form = new FormData();
-      form.append("clip", blob, "turn.webm");
-      const res = await fetch(`${API_BASE}/api/voice`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = await res.json();
-
-      onExchange?.({
-        transcript: data.transcript,
-        reply: data.reply,
-        products: data.products,
-        cart: data.cart,
-        checkout: data.checkout,
-      });
-
-      if (data.audio_b64) {
-        playReply(data.audio_b64, data.audio_mime || "audio/wav");
-      } else {
-        setError("No speech came back (TTS may not be set up — check the server log).");
-        afterReply();
-      }
-    } catch (err) {
-      setError(
-        (err instanceof Error ? err.message : "Voice request failed") +
-          ". Is `uvicorn server:app --port 8000` running?"
-      );
-      activeRef.current = false;
-      setMode("error");
-    }
-  }
-
-  function vadTick() {
-    if (!activeRef.current) return;
-    const analyser = analyserRef.current;
-    if (analyser) {
-      const buf = new Uint8Array(analyser.fftSize);
-      analyser.getByteTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / buf.length);
-      const now = performance.now();
-      const mode = modeRef.current;
-
-      if (mode === "listening" || mode === "capturing") {
-        if (rms > SPEECH_ON) {
-          lastVoiceRef.current = now;
-          if (mode === "listening") {
-            speechStartRef.current = now;
-            setMode("capturing");
-          }
-        } else if (rms > SPEECH_OFF && mode === "capturing") {
-          lastVoiceRef.current = now; // still trailing off, not silence yet
-        }
-
-        if (modeRef.current === "capturing") {
-          const spoke = now - speechStartRef.current;
-          const quiet = now - lastVoiceRef.current;
-          if ((quiet > SILENCE_MS && spoke > MIN_SPEECH_MS) || now - turnStartRef.current > MAX_TURN_MS) {
-            endTurn();
-          }
-        }
-      } else if (mode === "speaking") {
-        // barge-in: talk over the agent to cut it off
-        bargeRef.current = rms > BARGE_ON ? bargeRef.current + 1 : 0;
-        if (bargeRef.current >= BARGE_FRAMES) {
-          audioRef.current?.pause();
-          bargeRef.current = 0;
-          beginListening();
-        }
-      }
-    }
-    rafRef.current = requestAnimationFrame(vadTick);
-  }
+  // ---- call lifecycle ----------------------------------------------------
 
   async function startCall() {
     setError("");
-    setReplayReady(false);
+    setStatusHint("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       streamRef.current = stream;
+      setMic("granted");
 
       const Ctx: typeof AudioContext =
         window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new Ctx();
+      const ctx = new Ctx({ sampleRate: SAMPLE_RATE });
       await ctx.resume();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      analyser.smoothingTimeConstant = 0.4;
-      source.connect(analyser);
       ctxRef.current = ctx;
-      analyserRef.current = analyser;
+      nextStartTimeRef.current = ctx.currentTime;
 
-      setMic("granted");
-      activeRef.current = true;
-      rafRef.current = requestAnimationFrame(vadTick);
-      beginListening();
+      const workletUrl = URL.createObjectURL(new Blob([CAPTURE_WORKLET_SRC], { type: "application/javascript" }));
+      await ctx.audioWorklet.addModule(workletUrl);
+      URL.revokeObjectURL(workletUrl);
+
+      const ws = new WebSocket(WS_VOICE_URL);
+      ws.binaryType = "arraybuffer";
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        // Mic capture only starts once the socket is actually open, so no
+        // audio is dropped on the floor before the server can receive it.
+        const source = ctx.createMediaStreamSource(stream);
+        const worklet = new AudioWorkletNode(ctx, "pcm-capture-processor");
+        worklet.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
+        };
+        source.connect(worklet);
+        micSourceRef.current = source;
+        workletNodeRef.current = worklet;
+
+        activeRef.current = true;
+        setPhase("listening");
+      };
+
+      ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
+        if (typeof e.data === "string") {
+          try {
+            handleServerEvent(JSON.parse(e.data));
+          } catch {
+            /* malformed frame — ignore rather than crash the call */
+          }
+        } else {
+          scheduleAudio(e.data);
+        }
+      };
+
+      ws.onerror = () => {
+        setError("Lost the voice connection. Is `uvicorn server:app --port 8000` running?");
+        endCall();
+      };
+
+      ws.onclose = (e) => {
+        if (activeRef.current && e.code !== 1000) {
+          setError("The voice connection closed unexpectedly.");
+        }
+        endCall();
+      };
     } catch (err) {
       const name = err instanceof DOMException ? err.name : "";
       setMic(name === "NotAllowedError" ? "denied" : "prompt");
@@ -343,31 +363,39 @@ export default function VoiceMode({
             ? "No microphone was found."
             : (err instanceof Error && err.message) || "Could not start the call."
       );
-      setMode("error");
+      setPhase("error");
     }
   }
 
   const endCall = useCallback(() => {
     activeRef.current = false;
-    cancelAnimationFrame(rafRef.current);
+    stopPlayback();
+
     try {
-      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      wsRef.current?.close(1000);
     } catch {
       /* noop */
     }
-    audioRef.current?.pause();
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
+    wsRef.current = null;
+
+    workletNodeRef.current?.port.close();
+    workletNodeRef.current?.disconnect();
+    workletNodeRef.current = null;
+    micSourceRef.current?.disconnect();
+    micSourceRef.current = null;
+
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+
     ctxRef.current?.close().catch(() => {});
     ctxRef.current = null;
-    analyserRef.current = null;
-    setReplayReady(false);
-    setMode("idle");
-  }, [setMode]);
+
+    userTextRef.current = "";
+    replyTextRef.current = "";
+    setStatusHint("");
+    setPhase((p) => (p === "error" ? "error" : "idle"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopPlayback]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -390,14 +418,12 @@ export default function VoiceMode({
       : phase === "capturing"
         ? "Go on…"
         : phase === "thinking"
-          ? "Thinking…"
+          ? statusHint || "Thinking…"
           : phase === "speaking"
             ? "Speaking…"
             : phase === "error"
               ? "Call ended on an error"
-              : replayReady
-                ? "Tap to hear the reply"
-                : "Ready when you are";
+              : "Ready when you are";
 
   const wavesFast = phase === "capturing" || phase === "speaking";
 
@@ -472,36 +498,22 @@ export default function VoiceMode({
             <button
               className={`voice__mic ${phase === "capturing" ? "is-listening" : ""} ${
                 phase === "thinking" ? "is-busy" : ""
-              } ${phase === "speaking" ? "is-speaking" : ""} ${replayReady ? "is-replay" : ""}`}
-              onClick={
-                replayReady
-                  ? replay
-                  : !inCall
-                    ? startCall
-                    : undefined
-              }
-              disabled={inCall && !replayReady}
-              aria-label={
-                replayReady ? "Play the reply" : inCall ? "Call in progress" : "Start the call"
-              }
+              } ${phase === "speaking" ? "is-speaking" : ""}`}
+              onClick={!inCall ? startCall : undefined}
+              disabled={inCall}
+              aria-label={inCall ? "Call in progress" : "Start the call"}
             >
               <span className="voice__mic-ring" aria-hidden="true" />
               <span className="voice__mic-ring voice__mic-ring--2" aria-hidden="true" />
-              {replayReady ? (
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M8 5v14l11-7z" fill="currentColor" />
-                </svg>
-              ) : (
-                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
-                  <path
-                    d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="9" y="2.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
 
             <p className="voice__status">{status}</p>

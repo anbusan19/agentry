@@ -24,11 +24,13 @@ interface Message {
 }
 
 interface ChatConfig {
-  model_provider: "gemini" | "bedrock-mantle";
+  model_provider: "gemini" | "bedrock-mantle" | "groq";
   gemini_model: string;
   gemini_models: string[];
   mantle_model: string;
   mantle_models: string[];
+  groq_model: string;
+  groq_models: string[];
 }
 
 // Pinned locale + hour12: toLocaleTimeString's *default* locale/format can
@@ -111,6 +113,8 @@ export default function ChatPanel({
           gemini_models: data.gemini_models ?? [],
           mantle_model: data.mantle_model,
           mantle_models: data.mantle_models ?? [],
+          groq_model: data.groq_model,
+          groq_models: data.groq_models ?? [],
         });
       })
       .catch(() => {});
@@ -120,7 +124,7 @@ export default function ChatPanel({
     loadConfig();
   }, [loadConfig]);
 
-  async function changeModel(field: "gemini_model" | "mantle_model", next: string) {
+  async function changeModel(field: "gemini_model" | "mantle_model" | "groq_model", next: string) {
     setConfig((c) => (c ? { ...c, [field]: next } : c));
     setModelSaving(true);
     try {
@@ -425,6 +429,32 @@ export default function ChatPanel({
                   {(config.mantle_models.includes(config.mantle_model)
                     ? config.mantle_models
                     : [config.mantle_model, ...config.mantle_models]
+                  ).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : config?.model_provider === "groq" ? (
+              <label className="chat__model" title="Groq model — switch if one is rate-limited">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path
+                    d="M6 1.2l1.4 3 3.4.4-2.5 2.3.7 3.3L6 9.8 3 11.5l.7-3.3L1.2 5.6l3.4-.4L6 1.2z"
+                    stroke="currentColor"
+                    strokeWidth="1"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <select
+                  value={config.groq_model}
+                  onChange={(e) => changeModel("groq_model", e.target.value)}
+                  disabled={modelSaving}
+                  aria-label="Groq model"
+                >
+                  {(config.groq_models.includes(config.groq_model)
+                    ? config.groq_models
+                    : [config.groq_model, ...config.groq_models]
                   ).map((m) => (
                     <option key={m} value={m}>
                       {m}

@@ -119,6 +119,32 @@ Tone, for every reply you send (both notify_user and your own chat replies):
   thing.
 """
 
+# The same agent, for the real-time voice path (Nova Sonic, /ws/voice —
+# see voice/bidi_voice.py). Everything above the "Tone" section is shared
+# verbatim; only tone changes, and for one concrete reason: Nova Sonic
+# speaks whatever text it generates directly as audio, with no separate
+# TTS step to catch formatting. Markdown syntax ("**bold**", a "- " bullet)
+# would be read aloud as literal asterisks and dashes, and a bulleted list
+# doesn't work at all as speech. Same content rules, spoken-appropriate
+# tone instead.
+VOICE_SYSTEM_PROMPT = (
+    SYSTEM_PROMPT.rsplit("\nTone,", 1)[0]
+    + """
+Tone, since this is a live spoken conversation, not a chat window:
+- Never use markdown — no asterisks, no bullet dashes, no headers. Say a
+  list the way a person would out loud ("milk, bread, and eggs"), not as
+  a formatted list.
+- Keep replies short. A sentence or two per turn, not a paragraph. This is
+  a conversation, and the user can always ask a follow-up.
+- Don't use an em dash. Use a period, a comma, or just start a new sentence
+  instead.
+- Skip filler like "I have gone ahead and" or "please note that." Say the
+  thing.
+- notify_user still sends a Telegram message, exactly as in text mode — it
+  doesn't change what's spoken back to the user in this conversation.
+"""
+)
+
 PLANNING_PROMPT_TEMPLATE = """\
 Goal: {goal}
 

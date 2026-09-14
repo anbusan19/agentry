@@ -640,10 +640,9 @@ h1 {
 
 .arch {
   margin: 4px 0 0;
-  /* the diagram is authored on a fixed 1564 x 872 stage, then scaled to fill
-     the available width (never past 1.3x) so it uses the full column instead
-     of scrolling */
-  container-type: inline-size;
+  /* the diagram is authored on a fixed 1564 x 872 stage, then scaled down
+     (JS-driven, see ArchitectureDiagram.tsx) to fill the available width
+     instead of scrolling */
 }
 
 .arch__head {
@@ -669,35 +668,35 @@ h1 {
 }
 
 .arch__scroll {
-  /* resolves against .arch (the container); shared with .arch__stage below.
-     Fills the column width, capped at 1x. */
-  --arch-s: clamp(0.32, calc(100cqw / 1564px), 1);
+  /* Height and the stage's transform: scale() are both set inline by
+     ArchitectureDiagram.tsx, computed from this element's actual measured
+     width via ResizeObserver — see the component for why (a CSS-only
+     container-query version of this measured correctly but the resulting
+     transform never actually applied, cutting the diagram off on every
+     viewport tested). Scale is floored at 0.32 so the diagram never
+     shrinks to illegibility, which means it can still be wider than the
+     container on narrow screens — overflow-x: auto (not hidden) lets that
+     excess scroll into view instead of silently clipping it, and
+     justify-content: flex-start starts the scroll position at the left
+     edge (the Goal card, where the flow actually begins) rather than
+     centered on the middle of the diagram. */
   width: 100%;
-  height: calc(872px * var(--arch-s));
   padding-top: 12px;
-  overflow: hidden;
+  padding-bottom: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
   display: flex;
-  justify-content: center;
-}
-
-@supports not (width: 1cqw) {
-  /* no container-query support: keep the original horizontal scroll */
-  .arch__scroll {
-    height: auto;
-    padding-bottom: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    justify-content: flex-start;
-  }
-  .arch__stage {
-    transform: none;
-  }
+  justify-content: flex-start;
 }
 
 .arch__stage {
   position: relative;
-  transform-origin: top center;
-  transform: scale(var(--arch-s, 1));
+  /* top left, not top center: .arch__scroll aligns this box with
+     justify-content: flex-start, so the scale needs to anchor at that same
+     left edge — a center origin shrinks the box toward its own middle
+     instead, leaving a phantom gap (confirmed live: exactly half the
+     scale-removed width) even at scrollLeft 0. */
+  transform-origin: top left;
   flex: none;
   width: 1564px;
   height: 872px;

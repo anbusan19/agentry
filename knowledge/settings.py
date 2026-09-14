@@ -29,6 +29,9 @@ def _defaults() -> dict:
         # Which Bedrock Mantle model the agent talks to (MODEL_PROVIDER=
         # bedrock-mantle). Also selectable from the console composer.
         "mantle_model": os.environ.get("MANTLE_MODEL_ID", "openai.gpt-oss-120b"),
+        # Which Groq model the agent talks to (MODEL_PROVIDER=groq). Also
+        # selectable from the console composer.
+        "groq_model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
     }
 
 
