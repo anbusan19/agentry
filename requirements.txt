@@ -1,6 +1,15 @@
 # Agent framework (installed with the gemini extra — see README "Installation")
 # strands-agents[gemini]>=0.1.0
 # strands-agents-tools>=0.1.0
+#
+# Voice mode's Nova Sonic path also needs the bidi extra:
+#   pip install "strands-agents[bidi]"
+# This pulls in a newer mcp -> sse-starlette, which needs starlette>=0.49.1 —
+# incompatible with the fastapi==0.115.6 this file used to pin (fastapi caps
+# starlette at <0.42.0). Confirmed live: installing [bidi] into an existing
+# fastapi==0.115.6 env breaks the whole server. fastapi/starlette below are
+# bumped to the versions that actually resolve cleanly together with [bidi]
+# installed — re-tested against every existing /api/* route after the bump.
 
 # Browser automation
 playwright==1.47.0
@@ -16,7 +25,8 @@ networkx==3.4.2
 
 # Web console bridge (server.py) — bridges the chat UI in web/ to a live
 # Agent instance; not part of the core CLI path (main.py)
-fastapi==0.115.6
+fastapi==0.141.1
+starlette==1.6.0
 uvicorn[standard]==0.34.0
 
 # AWS Bedrock model provider — a stretch swap for Gemini, via Bedrock's
@@ -40,3 +50,15 @@ faster-whisper==1.1.0
 # one of:
 #   piper — download the `piper` binary + a .onnx voice, set PIPER_VOICE
 #   coqui — pip install "TTS==0.22.0"   (large; loads slowly)
+
+# ── Voice mode, real-time path (Amazon Nova 2 Sonic via bedrock, WebSocket
+# streaming, /ws/voice) — separate from the record-a-clip path above.
+# Requires Python 3.12+ (BidiNovaSonicModel's own constraint) and Bedrock
+# model access to amazon.nova-2-sonic-v1:0 requested in your account/region
+# (confirmed live in us-east-1 — model access is a separate grant from just
+# having AWS credentials, same as every other Bedrock model this project
+# uses). Installed via the strands-agents[bidi] extra — see the note above
+# fastapi/starlette about the dependency conflict that comes with it.
+aws-sdk-bedrock-runtime==0.11.0
+smithy-aws-core==0.11.0
+smithy-core==0.8.1
