@@ -87,18 +87,34 @@ function pcm16BufferToAudioBuffer(ctx: AudioContext, data: ArrayBuffer): AudioBu
 export default function VoiceMode({
   onClose,
   onExchange,
+  onToolUse,
+  onSpeakingChange,
+  onAnalyserReady,
 }: {
   onClose: () => void;
   onExchange?: (x: VoiceExchange) => void;
+  /** A tool call started (name) or the model moved on (null). Surfaced so
+   * the console can show "using search_products…" on the Agent Vision
+   * board instead of here — the mic itself no longer displays it. */
+  onToolUse?: (name: string | null) => void;
+  /** True while the model's spoken reply is playing — drives the Agent
+   * Vision board's small audio-level visualizer. */
+  onSpeakingChange?: (speaking: boolean) => void;
+  /** The playback AnalyserNode, handed up once per call so the visualizer
+   * can read live audio levels itself via requestAnimationFrame rather
+   * than have levels pushed through React state every frame. Called with
+   * null when the call ends. */
+  onAnalyserReady?: (analyser: AnalyserNode | null) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
   const [mic, setMic] = useState<MicPermission>("unknown");
   const [requesting, setRequesting] = useState(false);
-  const [statusHint, setStatusHint] = useState("");
+  const [reconnecting, setReconnecting] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -114,6 +130,14 @@ export default function VoiceMode({
   const activeRef = useRef(false);
   const onExchangeRef = useRef(onExchange);
   onExchangeRef.current = onExchange;
+  const onToolUseRef = useRef(onToolUse);
+  onToolUseRef.current = onToolUse;
+  const onSpeakingChangeRef = useRef(onSpeakingChange);
+  onSpeakingChangeRef.current = onSpeakingChange;
+  const onAnalyserReadyRef = useRef(onAnalyserReady);
+  onAnalyserReadyRef.current = onAnalyserReady;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   // ---- permission gate (unchanged from the record-a-clip version) ------
 
@@ -184,7 +208,10 @@ export default function VoiceMode({
     const buffer = pcm16BufferToAudioBuffer(ctx, data);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    // Routed through the analyser (which itself connects on to
+    // destination, see startCall) rather than straight to destination, so
+    // the Agent Vision board's visualizer can read live playback levels.
+    source.connect(analyserRef.current ?? ctx.destination);
     const startAt = Math.max(ctx.currentTime, nextStartTimeRef.current);
     source.start(startAt);
     nextStartTimeRef.current = startAt + buffer.duration;
@@ -222,13 +249,15 @@ export default function VoiceMode({
           return;
         }
         case "tool_use": {
-          setStatusHint(payload.name ? `Using ${payload.name}…` : "");
+          onToolUseRef.current?.(typeof payload.name === "string" ? payload.name : null);
           setPhase("thinking");
           return;
         }
         case "response_start": {
           setPhase("speaking");
-          setStatusHint("");
+          setReconnecting(false);
+          onToolUseRef.current?.(null);
+          onSpeakingChangeRef.current?.(true);
           return;
         }
         case "interruption": {
@@ -236,11 +265,14 @@ export default function VoiceMode({
           // immediately, the model has already stopped generating.
           stopPlayback();
           setPhase("capturing");
+          onSpeakingChangeRef.current?.(false);
+          onToolUseRef.current?.(null);
           return;
         }
         case "response_complete": {
           setPhase(activeRef.current ? "listening" : "idle");
-          setStatusHint("");
+          onSpeakingChangeRef.current?.(false);
+          onToolUseRef.current?.(null);
           if (userTextRef.current || replyTextRef.current) {
             onExchangeRef.current?.({
               transcript: userTextRef.current,
@@ -267,7 +299,7 @@ export default function VoiceMode({
           return;
         }
         case "connection_restart": {
-          setStatusHint("Reconnecting…");
+          setReconnecting(true);
           return;
         }
         case "connection_close": {
@@ -291,7 +323,7 @@ export default function VoiceMode({
 
   async function startCall() {
     setError("");
-    setStatusHint("");
+    setReconnecting(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -305,6 +337,16 @@ export default function VoiceMode({
       await ctx.resume();
       ctxRef.current = ctx;
       nextStartTimeRef.current = ctx.currentTime;
+
+      // Small FFT — this only feeds a 7-bar visualizer on the Agent Vision
+      // board, not a detailed spectrum, so low resolution keeps the
+      // per-frame read (done by that board's own rAF loop) cheap.
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.6;
+      analyser.connect(ctx.destination);
+      analyserRef.current = analyser;
+      onAnalyserReadyRef.current?.(analyser);
 
       const workletUrl = URL.createObjectURL(new Blob([CAPTURE_WORKLET_SRC], { type: "application/javascript" }));
       await ctx.audioWorklet.addModule(workletUrl);
@@ -383,6 +425,9 @@ export default function VoiceMode({
     workletNodeRef.current = null;
     micSourceRef.current?.disconnect();
     micSourceRef.current = null;
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
+    onAnalyserReadyRef.current?.(null);
 
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -392,33 +437,49 @@ export default function VoiceMode({
 
     userTextRef.current = "";
     replyTextRef.current = "";
-    setStatusHint("");
+    setReconnecting(false);
+    onToolUseRef.current?.(null);
+    onSpeakingChangeRef.current?.(false);
     setPhase((p) => (p === "error" ? "error" : "idle"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopPlayback]);
 
   useEffect(() => {
+    // Deliberately [] deps, not [onClose, endCall]: onClose is commonly an
+    // inline arrow function at the call site (ChatPanel's is), so it gets a
+    // new identity on every parent re-render. With this effect keyed to
+    // onClose's identity, a re-render *during* an active call — confirmed
+    // live: ChatPanel re-rendering in response to onAnalyserReady, fired
+    // from inside startCall's own async setup — reran the effect, whose
+    // cleanup called endCall() and closed the AudioContext mid-setup,
+    // before the still-in-flight startCall() promise chain had finished
+    // constructing nodes on it ("AudioWorkletNode cannot be created: No
+    // execution context available"). Reading onClose through a ref and
+    // keeping endCall (itself a stable useCallback) out of the deps list
+    // makes this run once per true mount/unmount instead.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
       endCall();
     };
-  }, [onClose, endCall]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- render ----------------------------------------------------------
 
   const inCall = phase !== "idle" && phase !== "error";
 
-  const status =
-    phase === "listening"
+  const status = reconnecting
+    ? "Reconnecting…"
+    : phase === "listening"
       ? "Listening…"
       : phase === "capturing"
         ? "Go on…"
         : phase === "thinking"
-          ? statusHint || "Thinking…"
+          ? "Thinking…" // what it's using shows on the Agent Vision board, not here
           : phase === "speaking"
             ? "Speaking…"
             : phase === "error"

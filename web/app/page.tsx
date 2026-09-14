@@ -24,7 +24,7 @@ const FEATURES = [
   {
     n: "03",
     title: "Pays like you would",
-    body: "Checkout settles from the storefront’s own wallet balance. No cards handed around, nothing on-chain — just the money that’s already there.",
+    body: "Checkout settles from the storefront’s own wallet balance. No cards handed around — just the money that’s already there.",
   },
   {
     n: "04",
@@ -40,7 +40,7 @@ const DIFFERENTIATORS = [
   },
   {
     title: "Platform-wallet checkout",
-    body: "Pays from the storefront’s native balance. No card entry, no x402, no chain.",
+    body: "Pays from the storefront’s native balance. No card entry needed.",
   },
   {
     title: "A budget for interruptions",
@@ -74,6 +74,7 @@ export default function Home() {
           <a href="#different">Approach</a>
           <a href="#stack">Stack</a>
           <a href="#architecture">Architecture</a>
+          <a href="/pitch">Pitch deck</a>
           <a href="/console">Console</a>
           <a className="hero__nav-cta" href="https://github.com/anbusan19/agentry">
             GitHub

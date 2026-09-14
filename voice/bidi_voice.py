@@ -37,6 +37,29 @@ enforces — BidiAgent's own loop reconnects automatically when it's hit
 (see BidiModelTimeoutError's docstring in the installed package), surfacing
 as a BidiConnectionRestartEvent that's relayed to the browser as a
 "connection_restart" frame rather than treated as fatal.
+
+Product tiles / cart / checkout data (VoiceStage.tsx, the "Agent Vision"
+panel) are relayed via a BidiMessageAddedEvent *hook* (_CartRelayHooks
+below), not by diffing agent.messages on BidiResponseCompleteEvent the way
+an earlier version of this file did. That mattered in practice, not just
+in theory — traced back from a live report of the vision panel showing
+nothing despite voice mode otherwise working correctly:
+
+  - Nova Sonic's "response complete" signal (confirmed against the
+    installed nova_sonic.py source) is about *audio generation* finishing
+    — it only ever reports stop_reason "complete" or "interrupted", never
+    "tool_use" — so there was no guarantee a tool's result had actually
+    landed in agent.messages by the time that event fired (BidiAgent runs
+    tools through a ConcurrentToolExecutor).
+  - The obvious next fix, hooking BidiAfterToolCallEvent (which exists
+    specifically to fire right when a tool call finishes) turned out to be
+    a dead end: it's defined in the installed package's hook-event types
+    but never actually invoked anywhere in the bidi agent loop — confirmed
+    by grepping the installed source, not assumed. This whole event type
+    is apparently not wired up yet in this experimental feature.
+  - BidiMessageAddedEvent, by contrast, genuinely does fire — confirmed the
+    same way — every time BidiAgent appends a message to agent.messages,
+    tool_use/tool_result pairs included. That's the one used here.
 """
 
 import base64
@@ -59,6 +82,8 @@ from strands.experimental.bidi.types.events import (
     BidiResponseStartEvent,
     BidiTranscriptStreamEvent,
 )
+from strands.experimental.hooks.events import BidiMessageAddedEvent
+from strands.hooks import HookProvider, HookRegistry
 from strands.types._events import ToolUseStreamEvent
 
 from agent.agent import AGENTRY_TOOLS
@@ -116,23 +141,15 @@ class _WebSocketBidiOutput:
     event, tagged by "type" so the frontend can dispatch without
     inspecting payload shape.
 
-    Also gives voice mode feature parity with the text console's product
-    tiles / cart / checkout cards (VoiceStage.tsx): the bidi output stream
-    only carries the tool *call* (ToolUseStreamEvent has no result), so on
-    each completed turn (BidiResponseCompleteEvent) this diffs
-    agent.messages against where the previous turn left off and runs the
-    same extraction helpers the REST /api/chat and /api/voice paths use
-    (agent.turn_extract — moved there specifically so both paths share it
-    without importing from each other)."""
+    Product/cart/checkout data doesn't come through here — see
+    _CartRelayHooks below and the module docstring for why a hook, not the
+    output-event stream, is what carries that."""
 
     def __init__(self, websocket: WebSocket):
         self._ws = websocket
-        self._agent: BidiAgent | None = None
-        self._seen_message_count = 0
 
     async def start(self, agent: BidiAgent) -> None:
-        self._agent = agent
-        self._seen_message_count = len(agent.messages)
+        return
 
     async def stop(self) -> None:
         return
@@ -176,19 +193,12 @@ class _WebSocketBidiOutput:
             return
 
         if isinstance(event, BidiResponseCompleteEvent):
-            # stop_reason "tool_use" means the model paused mid-turn to call
-            # a tool and will resume automatically once BidiAgent feeds the
-            # result back — not a real turn boundary from the user's
-            # perspective, so don't tell the frontend a turn finished here
-            # (it fires its one onExchange call per turn on this signal).
-            # Only "complete"/"interrupted"/"error" are genuine endings.
-            if event.stop_reason == "tool_use":
-                return
-            # turn_data first: by the time the frontend sees
-            # response_complete, it should already have any products/cart/
-            # checkout from this turn in hand, not arriving in a second
-            # frame after the fact.
-            await self._relay_turn_data()
+            # Confirmed against the installed nova_sonic.py source: this
+            # model only ever reports "complete" or "interrupted" here —
+            # never "tool_use" — so there's no intermediate stop_reason to
+            # filter out. Product/cart/checkout data is relayed separately
+            # by _CartRelayHooks, independent of this event's timing (see
+            # module docstring for why that split matters).
             await self._send_json({"type": "response_complete", "stop_reason": event.stop_reason})
             return
 
@@ -212,17 +222,39 @@ class _WebSocketBidiOutput:
     async def _send_json(self, payload: dict[str, Any]) -> None:
         await self._ws.send_text(json.dumps(payload))
 
-    async def _relay_turn_data(self) -> None:
-        """Extract this turn's search results / cart / checkout, if any,
-        and send them as one more frame — same trigger point the REST path
-        uses (a completed turn), same extraction helpers, different
-        transport."""
-        if self._agent is None:
+
+class _CartRelayHooks(HookProvider):
+    """Sends a "turn_data" frame as soon as a shopping tool's result
+    actually lands in the conversation, via BidiMessageAddedEvent — see the
+    module docstring for why this specific event, not BidiAfterToolCallEvent
+    or a timer tied to BidiResponseCompleteEvent.
+
+    Keeps its own running copy of the messages this hook has seen (BidiAgent
+    doesn't hand the hook its full history, just the one new message each
+    time) and reuses the exact same extraction helpers the REST /api/chat
+    path uses (agent.turn_extract) on the slice since the last relay — a
+    toolResult message can't introduce anything new by itself, but slicing
+    from "last relayed" rather than "just this message" is what lets those
+    helpers correlate it back to its toolUse (matched by toolUseId), which
+    arrived as the message immediately before it."""
+
+    def __init__(self, send_json: Any):
+        self._send_json = send_json
+        self._messages: list[dict[str, Any]] = []
+        self._relayed_count = 0
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        registry.add_callback(BidiMessageAddedEvent, self._on_message_added)
+
+    async def _on_message_added(self, event: BidiMessageAddedEvent) -> None:
+        self._messages.append(event.message)
+        # Only a toolResult message can introduce anything new — skip
+        # re-running extraction on every transcript/text message too.
+        if not any("toolResult" in block for block in event.message.get("content", [])):
             return
-        new_messages = self._agent.messages[self._seen_message_count :]
-        self._seen_message_count = len(self._agent.messages)
-        if not new_messages:
-            return
+
+        new_messages = self._messages[self._relayed_count :]
+        self._relayed_count = len(self._messages)
 
         products = extract_search_batches(new_messages)
         cart = extract_cart(new_messages)
@@ -266,7 +298,13 @@ async def run_voice_session(websocket: WebSocket) -> None:
         model_id="amazon.nova-2-sonic-v1:0",
         client_config={"region": os.environ.get("AWS_REGION", "us-east-1")},
     )
-    agent = BidiAgent(model=model, tools=AGENTRY_TOOLS, system_prompt=VOICE_SYSTEM_PROMPT)
+    cart_hooks = _CartRelayHooks(lambda payload: _safe_send_json(websocket, payload))
+    agent = BidiAgent(
+        model=model,
+        tools=AGENTRY_TOOLS,
+        system_prompt=VOICE_SYSTEM_PROMPT,
+        hooks=[cart_hooks],
+    )
 
     ws_input = _WebSocketBidiInput(websocket)
     ws_output = _WebSocketBidiOutput(websocket)

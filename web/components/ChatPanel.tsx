@@ -82,6 +82,12 @@ export default function ChatPanel({
   // wiping it from the transcript; any new agent reply clears the flag.
   const [stagePaymentHidden, setStagePaymentHidden] = useState(false);
   const [stageHost, setStageHost] = useState<Element | null>(null);
+  // Live voice-call state surfaced on the Agent Vision board (VoiceStage)
+  // rather than on VoiceMode's own mic overlay — see VoiceMode's onToolUse/
+  // onSpeakingChange/onAnalyserReady props.
+  const [voiceTool, setVoiceTool] = useState<string | null>(null);
+  const [voiceSpeaking, setVoiceSpeaking] = useState(false);
+  const [voiceAnalyser, setVoiceAnalyser] = useState<AnalyserNode | null>(null);
   // Computed after mount so the server render and hydration agree.
   const [greeting, setGreeting] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -214,6 +220,19 @@ export default function ChatPanel({
     );
   }
 
+  // Stable identity on purpose: VoiceMode keys an internal effect off this
+  // prop, and an inline arrow function here would get a new identity every
+  // ChatPanel render (voiceTool/voiceSpeaking/voiceAnalyser updates during
+  // an active call included), which — confirmed live — was enough to tear
+  // an in-progress call down mid-setup. See VoiceMode's own effect comment
+  // for the full story; this fixes it at the source too.
+  const closeVoice = useCallback(() => {
+    setVoiceOpen(false);
+    setVoiceTool(null);
+    setVoiceSpeaking(false);
+    setVoiceAnalyser(null);
+  }, []);
+
   // A completed voice turn: /api/voice already ran the agent, so just fold
   // the transcript + reply into the same message list the text chat uses —
   // the voice stage reads the latest agent turn from here.
@@ -290,7 +309,13 @@ export default function ChatPanel({
         }}
       />
       {voiceOpen && (
-        <VoiceMode onClose={() => setVoiceOpen(false)} onExchange={handleVoiceExchange} />
+        <VoiceMode
+          onClose={closeVoice}
+          onExchange={handleVoiceExchange}
+          onToolUse={setVoiceTool}
+          onSpeakingChange={setVoiceSpeaking}
+          onAnalyserReady={setVoiceAnalyser}
+        />
       )}
       {voiceOpen &&
         stageHost &&
@@ -304,6 +329,9 @@ export default function ChatPanel({
             onConfirmPay={handleConfirmPay}
             onCancelPay={handleCancelPay}
             paying={sending}
+            currentTool={voiceTool}
+            speaking={voiceSpeaking}
+            analyser={voiceAnalyser}
           />,
           stageHost
         )}

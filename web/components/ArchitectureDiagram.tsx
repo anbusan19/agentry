@@ -315,7 +315,7 @@ export function ArchitectureDiagram() {
                 <Bullet>Cart assembled on the real Zepto storefront</Bullet>
                 <Bullet>
                   <span className="arch__inline-ico">{Glyph.wallet}</span>
-                  Checkout paid from platform cash &mdash; no card, no chain
+                  Checkout paid from platform cash &mdash; no card needed
                 </Bullet>
                 <Bullet>Order lands; a Telegram receipt closes the loop</Bullet>
               </ul>
