@@ -13,14 +13,23 @@ the reliable path used here instead of fighting the cart drawer's DOM.
 Blinkit support (added for the Strands port) follows the same shape — go
 to the product page, click the stepper's '-' down to zero — but via
 tools/_session.py's glyph-based stepper_click instead of Zepto's confirmed
-aria-label, since Blinkit's stepper carries no aria-label at all.
+aria-label, since Blinkit's stepper carries no aria-label at all. Waits
+2000ms after navigating rather than Zepto's 1000ms — confirmed live that
+1000ms is sometimes too short for Blinkit's sticky action bar to hydrate,
+which made stepper_click legitimately (and wrongly) report "not in the
+cart" for an item that plainly was.
+
+The actual work happens in _remove_from_cart_impl, run on the single
+dedicated Playwright thread via run_on_playwright_thread — see
+tools/_session.py's module docstring for why that's required (not
+optional) whenever a tool touches a Page.
 """
 
 import re
 
 from strands import tool
 
-from tools._session import PLATFORMS, get_page, stepper_click
+from tools._session import PLATFORMS, get_page, run_on_playwright_thread, stepper_click
 
 
 @tool
@@ -43,6 +52,10 @@ def remove_from_cart(product_url: str, quantity: int = 0, platform: str = "zepto
         "cleared" from the cart. Call view_cart afterwards to confirm the
         cart's new contents/total.
     """
+    return run_on_playwright_thread(_remove_from_cart_impl, product_url, quantity, platform)
+
+
+def _remove_from_cart_impl(product_url: str, quantity: int, platform: str) -> dict:
     if platform not in PLATFORMS:
         return {"status": "error", "error": f"Unknown platform {platform!r} — use one of {list(PLATFORMS)}."}
 
@@ -51,7 +64,7 @@ def remove_from_cart(product_url: str, quantity: int = 0, platform: str = "zepto
     try:
         full_url = product_url if product_url.startswith("http") else f"{storefront_url}{product_url}"
         page.goto(full_url, wait_until="domcontentloaded", timeout=40000)
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(1000 if platform == "zepto" else 2000)
 
         if platform == "zepto":
             decrease = page.get_by_role("button", name="Decrease quantity by one")

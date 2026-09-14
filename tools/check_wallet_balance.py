@@ -21,13 +21,18 @@ balance line there is still unconfirmed (the wallet page loaded but never
 showed balance text in testing — inconclusive, not "broken"). If none of
 the candidate pages show a recognizable balance line, this returns a clear
 "not_found" rather than a guessed number.
+
+The actual work happens in _check_wallet_balance_impl, run on the single
+dedicated Playwright thread via run_on_playwright_thread — see
+tools/_session.py's module docstring for why that's required (not
+optional) whenever a tool touches a Page.
 """
 
 import re
 
 from strands import tool
 
-from tools._session import PLATFORMS, get_page
+from tools._session import PLATFORMS, get_page, run_on_playwright_thread
 
 _BALANCE_RE = re.compile(
     r"(available balance|wallet balance)\s*:?\s*₹\s?([\d,]+(?:\.\d+)?)", re.IGNORECASE
@@ -56,6 +61,10 @@ def check_wallet_balance(platform: str = "zepto") -> dict:
         A dict with status ("ok", "not_found", or "error") and, on success,
         "wallet" (e.g. "Zepto Cash & Gift Card") and "balance" (float).
     """
+    return run_on_playwright_thread(_check_wallet_balance_impl, platform)
+
+
+def _check_wallet_balance_impl(platform: str) -> dict:
     if platform not in PLATFORMS:
         return {"status": "error", "error": f"Unknown platform {platform!r} — use one of {list(PLATFORMS)}."}
 

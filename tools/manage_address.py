@@ -27,11 +27,16 @@ one storefront tool that didn't need a separate Blinkit code path for the
 Strands port — it was written platform-agnostic from the start. It's still
 unverified against a live Blinkit address sheet, though; see
 tools/_session.py's module docstring.
+
+The actual work happens in _manage_address_impl, run on the single
+dedicated Playwright thread via run_on_playwright_thread — see
+tools/_session.py's module docstring for why that's required (not
+optional) whenever a tool touches a Page.
 """
 
 from strands import tool
 
-from tools._session import PLATFORMS, get_page, js_click
+from tools._session import PLATFORMS, get_page, js_click, run_on_playwright_thread
 
 
 def _current_address(page) -> str:
@@ -162,6 +167,10 @@ def manage_address(action: str = "list", query: str = "", platform: str = "zepto
         is not supported here — status "error" with a note, so you can tell
         the user via notify_user.
     """
+    return run_on_playwright_thread(_manage_address_impl, action, query, platform)
+
+
+def _manage_address_impl(action: str, query: str, platform: str) -> dict:
     action = (action or "list").strip().lower()
     if action not in {"list", "select", "search"}:
         return {"status": "error", "error": f'Unknown action {action!r} — use "list", "select", or "search".'}

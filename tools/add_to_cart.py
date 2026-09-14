@@ -18,6 +18,11 @@ tools/_session.py's glyph-based stepper_click instead of a role/name
 lookup. "Already in cart" detection also had to change to match: Zepto's
 aria-labelled role lookup doesn't exist on Blinkit, so this checks for a
 visible bare "+"/"−" glyph button instead.
+
+The actual work happens in _add_to_cart_impl, run on the single dedicated
+Playwright thread via run_on_playwright_thread — see tools/_session.py's
+module docstring for why that's required (not optional) whenever a tool
+touches a Page.
 """
 
 import re
@@ -25,7 +30,7 @@ from urllib.parse import quote
 
 from strands import tool
 
-from tools._session import PLATFORMS, get_page, js_click, scrape_blinkit_results, stepper_click
+from tools._session import PLATFORMS, get_page, js_click, run_on_playwright_thread, scrape_blinkit_results, stepper_click
 
 _NAME_PRICE_RE = re.compile(r"([^\n]+)\n\nNet quantity[^\n]*\n\n₹\s*\n?\s*([\d,.]+)")
 _GENERIC_PRICE_RE = re.compile(r"(₹|Rs\.?)\s?([\d,]+(?:\.\d+)?)")
@@ -107,6 +112,10 @@ def add_to_cart(product_url: str = "", query: str = "", quantity: int = 1, platf
         A dict with status ("ok", "not_found", or "error"), and on success
         the item's "name", "price" (per unit), and "quantity" now in cart.
     """
+    return run_on_playwright_thread(_add_to_cart_impl, product_url, query, quantity, platform)
+
+
+def _add_to_cart_impl(product_url: str, query: str, quantity: int, platform: str) -> dict:
     if not product_url and not query:
         return {"status": "error", "error": "Provide either product_url or query."}
     if platform not in PLATFORMS:

@@ -18,13 +18,18 @@ is the right search path, and product cards are
 div[role="button"][id=<numeric id>] with no href at all — a different
 shape from Zepto's anchor cards — so it uses its own scraper
 (tools/_session.py's scrape_blinkit_results).
+
+The actual work happens in _search_products_impl, run on the single
+dedicated Playwright thread via run_on_playwright_thread — see
+tools/_session.py's module docstring for why that's required (not
+optional) whenever a tool touches a Page.
 """
 
 from urllib.parse import quote
 
 from strands import tool
 
-from tools._session import PLATFORMS, get_page, scrape_blinkit_results
+from tools._session import PLATFORMS, get_page, run_on_playwright_thread, scrape_blinkit_results
 
 _RESULTS_JS = r"""(max) => {
     const results = [];
@@ -78,6 +83,10 @@ def search_products(query: str, limit: int = 5, platform: str = "zepto") -> dict
         first. "image" is a product photo URL, or an empty string if the
         card had none.
     """
+    return run_on_playwright_thread(_search_products_impl, query, limit, platform)
+
+
+def _search_products_impl(query: str, limit: int, platform: str) -> dict:
     if platform not in PLATFORMS:
         return {"status": "error", "error": f"Unknown platform {platform!r} — use one of {list(PLATFORMS)}."}
 

@@ -33,6 +33,11 @@ cart all the way through to a placed order. Given the irreversible,
 spends-real-money nature of this tool, do not call it with confirm=True on
 Blinkit without deliberately testing the whole flow (small cart, watched
 run, headless=False) first.
+
+The actual work happens in _checkout_impl, run on the single dedicated
+Playwright thread via run_on_playwright_thread — see tools/_session.py's
+module docstring for why that's required (not optional) whenever a tool
+touches a Page.
 """
 
 import re
@@ -40,7 +45,7 @@ import re
 from strands import tool
 
 from knowledge.budget import record_spend
-from tools._session import PLATFORMS, get_page, js_click
+from tools._session import PLATFORMS, get_page, js_click, run_on_playwright_thread
 
 _WALLET_PATTERN = (
     r"zepto cash|zepto wallet|blinkit money|"
@@ -71,6 +76,10 @@ def checkout(confirm: bool = False, platform: str = "zepto") -> dict:
         A dict with status ("paid", "wallet_not_available", "not_confirmed",
         or "error"), and on "paid" an "amount_paid" float and "order_id".
     """
+    return run_on_playwright_thread(_checkout_impl, confirm, platform)
+
+
+def _checkout_impl(confirm: bool, platform: str) -> dict:
     if not confirm:
         return {
             "status": "not_confirmed",

@@ -30,9 +30,10 @@ platform, then try search_products / view_cart there before ever calling
 checkout(confirm=True) on it.
 """
 
+import concurrent.futures
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -90,6 +91,36 @@ _playwright = None
 _contexts: dict[str, object] = {}
 _pages: dict[str, Page] = {}
 
+# Every bit of actual Playwright work in this process — get_page() and
+# everything each tool does with the page it returns — is funneled through
+# this single dedicated worker thread. This isn't an optimization, it's
+# required correctness: Playwright's *sync* API is bound to the one OS
+# thread that created it (sync_playwright().start() roots a greenlet-based
+# dispatcher in that thread), and calling any page/context method from a
+# different thread fails outright with "greenlet.error: cannot switch to a
+# different thread" — confirmed live. Strands runs every @tool call via
+# asyncio.to_thread, which hands each call to whatever thread Python's
+# default executor pool has free — a different thread per call, easily,
+# especially when the agent issues two tool calls back to back. An earlier
+# version of this file only put a lock around get_page()'s lazy-init, which
+# stopped two threads from *creating* the driver at once but did nothing
+# for the (much more common) case of a second thread later *using* a page
+# a first thread had already created — that's what was actually breaking
+# live runs. Routing everything through one thread fixes both: only that
+# thread ever touches _playwright/_contexts/_pages, so there's no creation
+# race either, and no lock is needed.
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="playwright-owner")
+
+
+def run_on_playwright_thread(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run fn(*args, **kwargs) on the single thread that owns every
+    Playwright connection/context/page in this process, and block for its
+    result. Every storefront tool's @tool-decorated function is a thin
+    wrapper that does nothing but call this around its real implementation
+    — see any tools/*.py for the pattern. Never call get_page() or touch a
+    Page directly from a function that wasn't itself dispatched this way."""
+    return _executor.submit(fn, *args, **kwargs).result()
+
 
 def session_dir(platform: str) -> Path:
     return Path(__file__).parent / ".sessions" / f"{platform}-profile"
@@ -119,7 +150,12 @@ def get_page(platform: str = DEFAULT_PLATFORM, headless: bool = True) -> Page:
     """Return the shared, already-navigated-if-possible page for this
     platform in this process. Launches the persistent profile on first use.
     One context per platform, so switching platforms mid-process doesn't
-    tear down another platform's session."""
+    tear down another platform's session.
+
+    Must only be called from the dedicated Playwright thread — i.e. from
+    inside a function passed to run_on_playwright_thread(). No locking here:
+    that thread is the only caller by construction, so there's nothing to
+    race with."""
     global _playwright
 
     if platform not in PLATFORMS:
@@ -160,16 +196,26 @@ def is_logged_in(page: Page) -> bool:
 
 def stepper_click(page: Page, increase: bool) -> bool:
     """Click a quantity-stepper '+'/'−' control (the "− N +" widget that
-    appears next to an item once it's in the cart). Tries Zepto's
-    "Increase/Decrease quantity by one" aria-label first, then falls back
-    to a bare +/- glyph button, scoped to the current viewport.
+    appears next to an item once it's in the cart). Tries, in order: Zepto's
+    "Increase/Decrease quantity by one" aria-label; a bare +/- text glyph
+    button; an icon-font button (a <button> wrapping a child whose class
+    contains "plus"/"minus", e.g. Blinkit's `<span class="icon-minus">`,
+    which carries no text at all). The last two are scoped to the current
+    viewport.
 
     That viewport scoping matters: confirmed live on Blinkit, a plain
     "closest +/- anywhere in the DOM" search picks up unrelated glyphs
     lower on the page (a recommendations carousel's own "+" chip, far
     below the fold) instead of the real sticky action-bar stepper, and
     clicks that instead — silently not doing what was asked. Restricting
-    to elements actually on screen fixes that."""
+    to elements actually on screen fixes that.
+
+    The icon-font fallback exists because Blinkit's stepper stopped being
+    plain +/- text at some point after this was first verified live — it
+    now renders as an empty-text button wrapping an icon-font span, so the
+    text-glyph match alone silently found nothing and remove_from_cart
+    reported items as "not in the cart" when they genuinely were. Exactly
+    the kind of live DOM drift the project's own notes warn about."""
     verb = "increase" if increase else "decrease"
     try:
         btn = page.get_by_role("button", name=re.compile(rf"{verb} quantity( by one)?", re.I))
@@ -180,21 +226,39 @@ def stepper_click(page: Page, increase: bool) -> bool:
         pass
 
     glyphs = ["+", "＋"] if increase else ["−", "-", "–"]
+    icon_word = "plus" if increase else "minus"
     return page.evaluate(
-        """(glyphs) => {
-            const els = Array.from(document.querySelectorAll('button, div[role="button"], span'));
-            const candidates = els.filter(e => {
-                if (e.offsetParent === null || !glyphs.includes((e.textContent || '').trim())) return false;
+        """(args) => {
+            const [glyphs, iconWord] = args;
+            const inViewport = (e) => {
                 const rect = e.getBoundingClientRect();
                 return rect.bottom >= 0 && rect.top <= window.innerHeight;
-            });
+            };
+
+            const glyphEls = Array.from(document.querySelectorAll('button, div[role="button"], span'))
+                .filter(e => e.offsetParent !== null && glyphs.includes((e.textContent || '').trim()) && inViewport(e));
+
+            // Real <button>s first: a generic div[role="button"] can be an
+            // outer wrapper around the *whole* stepper (both +/- icons),
+            // sitting lower on the page than the actual clickable button
+            // inside it — confirmed live, that wrapper matched instead of
+            // the real button and the click did nothing. Only fall back to
+            // div wrappers if no actual <button> icon match exists.
+            const iconButtons = Array.from(document.querySelectorAll('button'))
+                .filter(e => e.offsetParent !== null && inViewport(e) && e.querySelector(`[class*="${iconWord}" i]`));
+            const iconDivs = iconButtons.length
+                ? []
+                : Array.from(document.querySelectorAll('div[role="button"]'))
+                    .filter(e => e.offsetParent !== null && inViewport(e) && e.querySelector(`[class*="${iconWord}" i]`));
+
+            const candidates = [...glyphEls, ...iconButtons, ...iconDivs];
             // Prefer the one closest to the bottom of the viewport — that's
             // where a sticky add-to-cart/stepper action bar lives.
             candidates.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom);
             if (candidates[0]) { candidates[0].click(); return true; }
             return false;
         }""",
-        glyphs,
+        [glyphs, icon_word],
     )
 
 

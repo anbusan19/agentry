@@ -78,7 +78,19 @@ _NON_CHAT_MARKERS = (
     "customtools",
     "embedding",
     "aqa",
+    "whisper",
+    "guard",
 )
+
+_groq_models_cache: Optional[list[str]] = None
+
+# Used when GROQ_API_KEY is unset or the models.list() call fails — a small
+# hand-picked set so the composer selector is never empty.
+FALLBACK_GROQ_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+]
 
 
 def _gemini_models() -> list[str]:
@@ -118,6 +130,36 @@ def _gemini_models() -> list[str]:
         _gemini_models_cache = FALLBACK_GEMINI_MODELS
 
     return _gemini_models_cache
+
+
+def _groq_models() -> list[str]:
+    """Every chat-capable model Groq's API currently lists, newest/most
+    capable first. Falls back to FALLBACK_GROQ_MODELS on any failure (no
+    key set, network, SDK shape change) so the UI selector always has
+    something to show."""
+    global _groq_models_cache
+    if _groq_models_cache is not None:
+        return _groq_models_cache
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        _groq_models_cache = FALLBACK_GROQ_MODELS
+        return _groq_models_cache
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
+        names = [
+            m.id
+            for m in client.models.list().data
+            if not any(marker in m.id.lower() for marker in _NON_CHAT_MARKERS)
+        ]
+        _groq_models_cache = sorted(set(names), reverse=True) or FALLBACK_GROQ_MODELS
+    except Exception:
+        _groq_models_cache = FALLBACK_GROQ_MODELS
+
+    return _groq_models_cache
 
 
 def _get_agent():
@@ -241,6 +283,18 @@ def _extract_checkout(messages: list[dict[str, Any]]) -> Optional[dict]:
 _RETRY_RE = re.compile(r"retry(?:delay)?[\"\s:]+(\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
 
 
+# Per-provider naming for the messages below — keyed by knowledge.settings'
+# "model_provider" values (agent/agent.py's build_agent switch). Fixes a
+# real bug: this used to hardcode "Gemini" in every message regardless of
+# which provider was actually active, so a Groq or Bedrock user hitting
+# their own provider's rate limit was told to go check Gemini's quota.
+_PROVIDER_INFO = {
+    "gemini": {"label": "Gemini", "quota_note": "Each model has its own small free quota, so switching usually gets you moving again.", "api_key_env": "GEMINI_API_KEY"},
+    "groq": {"label": "Groq", "quota_note": "Each model has its own separate rate limit, so switching usually gets you moving again.", "api_key_env": "GROQ_API_KEY"},
+    "bedrock-mantle": {"label": "Bedrock", "quota_note": "Try again shortly, or switch models/providers in Settings.", "api_key_env": "your AWS credentials"},
+}
+
+
 def _friendly_model_error(exc: Exception) -> Optional[str]:
     """Turn a known model-provider failure into a plain message for the
     console. Returns None for anything unrecognised (let it 500 so real
@@ -248,23 +302,26 @@ def _friendly_model_error(exc: Exception) -> Optional[str]:
     text = str(exc)
     low = text.lower()
 
+    provider_id = get_settings().get("model_provider", "gemini")
+    provider = _PROVIDER_INFO.get(provider_id, _PROVIDER_INFO["gemini"])
+
     if "429" in text or "resource_exhausted" in low or "rate limit" in low or "quota" in low:
         m = _RETRY_RE.search(text)
         wait = f" Try again in about {round(float(m.group(1)))}s" if m else " Give it a minute"
         return (
-            "Hit the Gemini free-tier rate limit for this model."
-            f"{wait}, or pick a different Gemini model from the selector in the message box. "
-            "Each model has its own small free quota, so switching usually gets you moving again."
+            f"Hit {provider['label']}'s rate limit for this model."
+            f"{wait}, or pick a different model from the selector in the message box. "
+            f"{provider['quota_note']}"
         )
     if "accessdenied" in low or ("bedrock" in low and "access" in low) or "not authorized to perform" in low:
         return (
             "The selected Bedrock model isn't enabled for your AWS account in this region. "
-            "Enable it under Bedrock > Model access, or switch the provider back to Gemini in Settings."
+            "Enable it under Bedrock > Model access, or switch the provider in Settings."
         )
     if "api key" in low or "api_key" in low or "unauthenticated" in low or "invalid authentication" in low:
         return (
-            "The model API key looks missing or invalid. Check GEMINI_API_KEY (or your AWS "
-            "credentials) in .env, then restart the server."
+            f"The model API key looks missing or invalid. Check {provider['api_key_env']} "
+            "in .env, then restart the server."
         )
     return None
 
@@ -423,6 +480,7 @@ class SettingsPatch(BaseModel):
     model_provider: Optional[str] = None
     gemini_model: Optional[str] = None
     mantle_model: Optional[str] = None
+    groq_model: Optional[str] = None
 
 
 def _settings_payload() -> dict:
@@ -436,12 +494,15 @@ def _settings_payload() -> dict:
         "gemini_models": _gemini_models(),
         "mantle_model": settings.get("mantle_model", MANTLE_MODELS[1]),
         "mantle_models": MANTLE_MODELS,
+        "groq_model": settings.get("groq_model", FALLBACK_GROQ_MODELS[0]),
+        "groq_models": _groq_models(),
         "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
         "bedrock_configured": bool(
             os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
             or os.environ.get("AWS_ACCESS_KEY_ID")
             or os.environ.get("AWS_PROFILE")
         ),
+        "groq_configured": bool(os.environ.get("GROQ_API_KEY")),
         "telegram_configured": bool(
             os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
         ),
@@ -464,8 +525,10 @@ async def update_settings_endpoint(patch: SettingsPatch):
         "model_provider" in changes and changes["model_provider"] != current["model_provider"]
     )
     model_changed = (
-        "gemini_model" in changes and changes["gemini_model"] != current.get("gemini_model")
-    ) or ("mantle_model" in changes and changes["mantle_model"] != current.get("mantle_model"))
+        ("gemini_model" in changes and changes["gemini_model"] != current.get("gemini_model"))
+        or ("mantle_model" in changes and changes["mantle_model"] != current.get("mantle_model"))
+        or ("groq_model" in changes and changes["groq_model"] != current.get("groq_model"))
+    )
     if provider_changed or model_changed:
         # The cached Agent was built with the old model — drop it so the
         # next chat request rebuilds one with whatever's now selected,

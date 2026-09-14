@@ -20,13 +20,18 @@ the item-only subtotal (price *after* the label, like Zepto) but "TOTAL"
 for the final payable amount has the price *before* the label
 ("₹107\nTOTAL", not "TOTAL\n₹107") — confirmed against a real cart with one
 item — so the generic total regex below checks both orders.
+
+The actual work happens in _view_cart_impl, run on the single dedicated
+Playwright thread via run_on_playwright_thread — see tools/_session.py's
+module docstring for why that's required (not optional) whenever a tool
+touches a Page.
 """
 
 import re
 
 from strands import tool
 
-from tools._session import PLATFORMS, get_page
+from tools._session import PLATFORMS, get_page, run_on_playwright_thread
 
 _WEIGHT_RE = re.compile(r"^\d+\s*(pack|pc|pcs)\b.*\(", re.IGNORECASE)
 _PRICE_RE = re.compile(r"^₹\s?[\d,.]+$")
@@ -114,6 +119,10 @@ def view_cart(platform: str = "zepto") -> dict:
         {name, quantity, price}), and "total" (the amount payable, e.g.
         "₹83" — this already reflects delivery/handling fees and discounts).
     """
+    return run_on_playwright_thread(_view_cart_impl, platform)
+
+
+def _view_cart_impl(platform: str) -> dict:
     if platform not in PLATFORMS:
         return {"status": "error", "error": f"Unknown platform {platform!r} — use one of {list(PLATFORMS)}."}
 
