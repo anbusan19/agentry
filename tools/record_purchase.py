@@ -22,9 +22,9 @@ def record_purchase(items: list[str], platform: str = "zepto") -> dict:
     Args:
         items: The item names bought in this order, e.g.
             ["amul milk 500ml", "bread"].
-        platform: Which storefront the order was placed on — "zepto",
-            "blinkit", or "instamart". Defaults to "zepto"; only pass
-            something else if checkout actually ran on that platform. Tags
+        platform: Which storefront the order was placed on — "zepto" or
+            "blinkit". Defaults to "zepto"; only pass something else if
+            checkout actually ran on that platform. Tags
             each item's purchase history with where it was bought, for
             restock timing per-platform and, eventually, price comparison
             across stores.

@@ -14,15 +14,23 @@ scripts/capture_session.py writes cookies straight to this profile directory,
 and every tool call afterwards reuses them automatically. No explicit
 save/load step needed.
 
-Multi-platform note: PLATFORMS below is the registry for Blinkit/Instamart
-expansion — session capture (login) already works for any of them, since
-that flow is just "open the URL, let the user log in, keep the profile."
-What's still Zepto-only is every tool's actual scraping logic
-(search_products.py, add_to_cart.py, etc.), which hardcodes Zepto's DOM.
-Porting those to another platform means giving each one its own selectors,
-not just pointing this file at a different URL.
+Multi-platform note: every storefront tool (search_products.py,
+add_to_cart.py, view_cart.py, remove_from_cart.py, checkout.py,
+check_wallet_balance.py, manage_address.py) takes a `platform` arg and has
+a code path for both platforms below. Zepto's path is the original, worked
+out and exercised against the live site with stable data-testid selectors.
+Blinkit's was worked out and confirmed live separately (own selectors —
+div[role="button"][id] product cards, a glyph-based quantity stepper, a
+directly-navigable /cart page — see scrape_blinkit_results and
+stepper_click below). check_wallet_balance and manage_address on Blinkit
+are still unconfirmed (the wallet page loaded but never rendered a balance
+in testing — inconclusive, not "broken"), and incrementing the quantity of
+an item already in the cart is flaky. Run scripts/capture_session.py for a
+platform, then try search_products / view_cart there before ever calling
+checkout(confirm=True) on it.
 """
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -34,18 +42,29 @@ PLATFORMS: dict[str, dict] = {
     "zepto": {
         "label": "Zepto",
         "url": "https://www.zepto.com",
-        # Shopping tools (search/cart/checkout) are implemented for this one.
+        # Shopping tools (search/cart/checkout) are implemented for this one
+        # and have been run against a live logged-in session.
         "supported": True,
+        "verified": True,
     },
     "blinkit": {
         "label": "Blinkit",
         "url": "https://blinkit.com",
-        "supported": False,
-    },
-    "instamart": {
-        "label": "Swiggy Instamart",
-        "url": "https://www.swiggy.com/instamart",
-        "supported": False,
+        # Verified live (against a real logged-in session) while porting:
+        # search, add-to-cart, and the cart page all work. Product cards are
+        # div[role="button"][id=<numeric product id>] with no href — see
+        # scrape_blinkit_results below — and /prn/<anything>/prid/<id> routes
+        # correctly regardless of the slug text, confirmed by navigating
+        # there with a deliberately wrong slug. check_wallet_balance and
+        # manage_address are still unconfirmed (the wallet page loaded but
+        # never rendered a balance in testing — inconclusive, not "broken").
+        # One known remaining gap: incrementing/decrementing the quantity
+        # of an item ALREADY in the cart is flaky (stepper_click sometimes
+        # can't find the "− N +" control even though it's on screen) —
+        # fresh adds, search, and view_cart are solid, but don't trust
+        # "add more of what's already there" unattended yet.
+        "supported": True,
+        "verified": True,
     },
 }
 
@@ -89,6 +108,7 @@ def platform_status() -> list[dict]:
                 "label": info["label"],
                 "url": info["url"],
                 "supported": info["supported"],
+                "verified": info.get("verified", False),
                 "connected": connected,
             }
         )
@@ -136,6 +156,92 @@ def is_logged_in(page: Page) -> bool:
         return not page.locator("text=Please Login").is_visible()
     except Exception:
         return True
+
+
+def stepper_click(page: Page, increase: bool) -> bool:
+    """Click a quantity-stepper '+'/'−' control (the "− N +" widget that
+    appears next to an item once it's in the cart). Tries Zepto's
+    "Increase/Decrease quantity by one" aria-label first, then falls back
+    to a bare +/- glyph button, scoped to the current viewport.
+
+    That viewport scoping matters: confirmed live on Blinkit, a plain
+    "closest +/- anywhere in the DOM" search picks up unrelated glyphs
+    lower on the page (a recommendations carousel's own "+" chip, far
+    below the fold) instead of the real sticky action-bar stepper, and
+    clicks that instead — silently not doing what was asked. Restricting
+    to elements actually on screen fixes that."""
+    verb = "increase" if increase else "decrease"
+    try:
+        btn = page.get_by_role("button", name=re.compile(rf"{verb} quantity( by one)?", re.I))
+        if btn.first.is_visible():
+            btn.first.click()
+            return True
+    except Exception:
+        pass
+
+    glyphs = ["+", "＋"] if increase else ["−", "-", "–"]
+    return page.evaluate(
+        """(glyphs) => {
+            const els = Array.from(document.querySelectorAll('button, div[role="button"], span'));
+            const candidates = els.filter(e => {
+                if (e.offsetParent === null || !glyphs.includes((e.textContent || '').trim())) return false;
+                const rect = e.getBoundingClientRect();
+                return rect.bottom >= 0 && rect.top <= window.innerHeight;
+            });
+            // Prefer the one closest to the bottom of the viewport — that's
+            // where a sticky add-to-cart/stepper action bar lives.
+            candidates.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom);
+            if (candidates[0]) { candidates[0].click(); return true; }
+            return false;
+        }""",
+        glyphs,
+    )
+
+
+_BLINKIT_RESULTS_JS = r"""(max) => {
+    const cards = Array.from(document.querySelectorAll('div[role="button"][id]'))
+        .filter(c => /^\d+$/.test(c.id));
+    const results = [];
+    for (const card of cards) {
+        const lines = (card.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+        const price = lines.find(l => /^₹\d/.test(l));
+        if (!price) continue;
+        const name = lines.find(l =>
+            l !== price &&
+            l !== 'ADD' &&
+            !/^\d+\.?\d*\s*(ml|g|kg|l|pack|pc|pcs)\b/i.test(l) &&
+            !/mins?$/i.test(l) &&
+            l.length > 3
+        );
+        if (!name) continue;
+        const img = card.querySelector('img');
+        // Blinkit routes on /prn/<slug>/prid/<id> and ignores the slug text
+        // entirely (confirmed by navigating with a deliberately wrong one),
+        // so the id is all that matters for add_to_cart to find this again.
+        results.push({ name, price, url: `/prn/product/prid/${card.id}`, image: img ? (img.getAttribute('src') || '') : '' });
+        if (results.length >= max) break;
+    }
+    return results;
+}"""
+
+
+def scrape_blinkit_results(page: Page, limit: int) -> list[dict]:
+    """Blinkit-specific product scrape, confirmed live while porting:
+    product cards are `<div role="button" id="<numeric product id>">` with
+    no `<a href>` at all (unlike Zepto's anchor-based cards). The product id
+    doubles as the routable id in /prn/<anything>/prid/<id> — Blinkit
+    ignores the slug text, confirmed by loading that URL with a
+    deliberately wrong slug and getting the right product."""
+    try:
+        page.wait_for_function(
+            """() => Array.from(document.querySelectorAll('div[role="button"][id]'))
+                .some(c => /^\\d+$/.test(c.id) && /₹\\d/.test(c.innerText || ''))""",
+            timeout=10000,
+        )
+    except Exception:
+        pass
+    page.wait_for_timeout(500)
+    return page.evaluate(_BLINKIT_RESULTS_JS, limit)
 
 
 def js_click(page: Page, pattern: str) -> bool:

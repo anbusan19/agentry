@@ -248,7 +248,6 @@ export default function KnowledgeGraph() {
           <span className="kg__dot kg__dot--due" /> due soon
           <span className="kg__dot kg__dot--zepto" /> zepto
           <span className="kg__dot kg__dot--blinkit" /> blinkit
-          <span className="kg__dot kg__dot--instamart" /> instamart
         </span>
         {state === "empty" && (
           <p className="kg__note">

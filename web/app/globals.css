@@ -8,7 +8,6 @@
   /* purchase-graph node fill, by storefront */
   --zepto-light: #d9c7f2;
   --blinkit-light: #f3dd8c;
-  --instamart-light: #a9d4f2;
   --line: rgba(242, 239, 230, 0.14);
   --gutter: clamp(24px, 5vw, 72px);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
@@ -1847,10 +1846,6 @@ h1 {
   background: var(--blinkit-light);
 }
 
-.kg__dot--instamart {
-  background: var(--instamart-light);
-}
-
 .kg__canvas {
   position: relative;
   flex: 1;
@@ -1903,10 +1898,6 @@ h1 {
 
 .kg__node--blinkit circle {
   fill: var(--blinkit-light);
-}
-
-.kg__node--instamart circle {
-  fill: var(--instamart-light);
 }
 
 /* Restock status reads as a stroke ring on top of the platform fill, so
@@ -2221,6 +2212,12 @@ h1 {
   color: var(--paper-dim);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--line);
+}
+
+.settings__badge--beta {
+  color: #e6b980;
+  background: rgba(230, 185, 128, 0.1);
+  border: 1px solid rgba(230, 185, 128, 0.35);
 }
 
 .settings__cmd {

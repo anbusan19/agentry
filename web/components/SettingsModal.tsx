@@ -9,16 +9,19 @@ interface Platform {
   label: string;
   url: string;
   supported: boolean;
+  verified: boolean;
   connected: boolean;
 }
 
 interface Settings {
   weekly_budget_inr: number;
   spent_this_week: number;
-  model_provider: "gemini" | "bedrock-mantle";
+  model_provider: "gemini" | "bedrock-mantle" | "groq";
   gemini_model?: string;
+  groq_model?: string;
   gemini_configured: boolean;
   bedrock_configured: boolean;
+  groq_configured: boolean;
   telegram_configured: boolean;
   platforms: Platform[];
   graph_stats: { items: number; co_purchase_links: number };
@@ -27,6 +30,7 @@ interface Settings {
 const MODEL_LABEL: Record<string, string> = {
   gemini: "Gemini",
   "bedrock-mantle": "AWS Bedrock",
+  groq: "Groq",
 };
 
 type Section = "general" | "storefronts" | "budget" | "notifications" | "graph" | "about";
@@ -51,7 +55,6 @@ function StatusDot({ ok }: { ok: boolean }) {
 const PLATFORM_LOGO: Record<string, string> = {
   zepto: "/zepto.png",
   blinkit: "/blinkit.png",
-  instamart: "/instamart.png",
 };
 
 function PlatformBadge({ id }: { id: string }) {
@@ -103,7 +106,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  async function setProvider(provider: "gemini" | "bedrock-mantle") {
+  async function setProvider(provider: "gemini" | "bedrock-mantle" | "groq") {
     if (!settings || settings.model_provider === provider) return;
     setSwitchingProvider(true);
     setError("");
@@ -192,12 +195,19 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                   >
                     AWS Bedrock
                   </button>
+                  <button
+                    className={`settings__toggle-btn ${settings.model_provider === "groq" ? "settings__toggle-btn--active" : ""}`}
+                    onClick={() => setProvider("groq")}
+                    disabled={switchingProvider}
+                  >
+                    Groq
+                  </button>
                 </div>
               </label>
               <p className="settings__intro">
                 Takes effect on the next message — no restart needed. Bedrock runs through the
                 OpenAI-compatible Mantle endpoint and needs real IAM credentials (not just an
-                AWS login) so Strands can mint its bearer tokens.
+                AWS login) so Strands can mint its bearer tokens. Groq just needs a plain API key.
               </p>
 
               <div className="settings__row">
@@ -205,13 +215,15 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 <span className="settings__row-value">
                   {settings.model_provider === "gemini" && settings.gemini_model
                     ? settings.gemini_model
-                    : MODEL_LABEL[settings.model_provider]}
+                    : settings.model_provider === "groq" && settings.groq_model
+                      ? settings.groq_model
+                      : MODEL_LABEL[settings.model_provider]}
                 </span>
               </div>
-              {settings.model_provider === "gemini" && (
+              {(settings.model_provider === "gemini" || settings.model_provider === "groq") && (
                 <p className="settings__intro">
-                  Pick which Gemini model handles chat from the selector in the message
-                  composer — handy when one model hits its daily free-tier request cap.
+                  Pick which {MODEL_LABEL[settings.model_provider]} model handles chat from the
+                  selector in the message composer — handy when one model hits its rate limit.
                 </p>
               )}
               <div className="settings__row">
@@ -231,6 +243,13 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 </span>
               </div>
               <div className="settings__row">
+                <span className="settings__row-label">Groq API key</span>
+                <span className="settings__row-value">
+                  <StatusDot ok={settings.groq_configured} />
+                  {settings.groq_configured ? "Configured" : "Missing — set GROQ_API_KEY"}
+                </span>
+              </div>
+              <div className="settings__row">
                 <span className="settings__row-label">Agent bridge</span>
                 <span className="settings__row-value">
                   <StatusDot ok={true} />
@@ -245,8 +264,9 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
               <h2 className="settings__heading">Storefronts</h2>
               <p className="settings__intro">
                 Each platform needs its own login, captured once and reused after. Shopping tools
-                (search, cart, checkout) are only wired up for platforms marked Supported below —
-                the rest can still have a session captured ahead of time.
+                (search, cart, checkout) are wired up for every platform below; ones marked Beta
+                use generic, unverified selectors and haven&apos;t been run against a live cart yet
+                — double-check a small order there before trusting checkout unattended.
               </p>
               {settings.platforms.map((p) => (
                 <div className="settings__platform" key={p.id}>
@@ -255,8 +275,12 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                       <PlatformBadge id={p.id} />
                       {p.label}
                     </span>
-                    <span className={`settings__badge ${p.supported ? "settings__badge--ok" : "settings__badge--soon"}`}>
-                      {p.supported ? "Supported" : "Coming soon"}
+                    <span
+                      className={`settings__badge ${
+                        !p.supported ? "settings__badge--soon" : p.verified ? "settings__badge--ok" : "settings__badge--beta"
+                      }`}
+                    >
+                      {!p.supported ? "Coming soon" : p.verified ? "Supported" : "Beta"}
                     </span>
                   </div>
                   <div className="settings__row">
@@ -272,9 +296,9 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 </div>
               ))}
               <p className="settings__attribution">
-                Zepto, Blinkit, and Swiggy Instamart names and marks belong to their respective
-                owners. Agentry isn&apos;t affiliated with or endorsed by any of them — it just
-                automates the storefront you&apos;ve logged into.
+                Zepto and Blinkit names and marks belong to their respective owners. Agentry
+                isn&apos;t affiliated with or endorsed by either of them — it just automates the
+                storefront you&apos;ve logged into.
               </p>
             </section>
           )}

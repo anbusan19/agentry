@@ -12,21 +12,26 @@ three cheap, safe cases:
   - select : switch the active address to a saved one matching a keyword
   - search : set the delivery location from a locality / landmark search
 
-Adding a brand-new saved address on Zepto means dragging a map pin and
-filling a flat/house form — that's fragile to do blind and easy to get
-wrong, so it's deliberately out of scope here; the tool says so and the
-agent can fall back to notify_user.
+Adding a brand-new saved address means dragging a map pin and filling a
+flat/house form on most of these sites — that's fragile to do blind and
+easy to get wrong, so it's deliberately out of scope here; the tool says so
+and the agent can fall back to notify_user.
 
 Not a port — worked out against the live Zepto mobile site (the iPhone UA
 in tools/_session.py). The address sheet's DOM has no stable test ids, so
 the selectors below are text/heuristic based and may need a refresh if the
 site changes; every path fails soft with a clear status rather than
-throwing.
+throwing. That same heuristic style (no data-testid dependency, plain
+text/keyword matching over the address sheet) is what makes this tool the
+one storefront tool that didn't need a separate Blinkit code path for the
+Strands port — it was written platform-agnostic from the start. It's still
+unverified against a live Blinkit address sheet, though; see
+tools/_session.py's module docstring.
 """
 
 from strands import tool
 
-from tools._session import STOREFRONT_URL, get_page, js_click
+from tools._session import PLATFORMS, get_page, js_click
 
 
 def _current_address(page) -> str:
@@ -124,7 +129,7 @@ def _scrape_addresses(page) -> list[dict]:
 
 
 @tool
-def manage_address(action: str = "list", query: str = "") -> dict:
+def manage_address(action: str = "list", query: str = "", platform: str = "zepto") -> dict:
     """
     View, switch, or set the storefront delivery address. Prices, stock,
     and delivery times are all tied to the address, so use this before
@@ -143,6 +148,9 @@ def manage_address(action: str = "list", query: str = "") -> dict:
                        saved address.
         query: The keyword to match ("select") or the place to look up
             ("search"). Ignored for "list".
+        platform: Which storefront — "zepto" (default) or "blinkit".
+            Blinkit is unverified against a live address sheet — see
+            tools/_session.py PLATFORMS.
 
     Returns:
         A dict with status ("ok", "not_found", "error"). For "list" and
@@ -159,10 +167,12 @@ def manage_address(action: str = "list", query: str = "") -> dict:
         return {"status": "error", "error": f'Unknown action {action!r} — use "list", "select", or "search".'}
     if action in {"select", "search"} and not query.strip():
         return {"status": "error", "error": f'action "{action}" needs a non-empty query.'}
+    if platform not in PLATFORMS:
+        return {"status": "error", "error": f"Unknown platform {platform!r} — use one of {list(PLATFORMS)}."}
 
-    page = get_page()
+    page = get_page(platform)
     try:
-        page.goto(STOREFRONT_URL, wait_until="domcontentloaded", timeout=40000)
+        page.goto(PLATFORMS[platform]["url"], wait_until="domcontentloaded", timeout=40000)
         page.wait_for_timeout(1200)
         before = _current_address(page)
 

@@ -12,8 +12,8 @@ same order — this is what lets get_restock_suggestions round out a restock
 list ("you usually buy X with Y"), and what server.py's /api/graph groups
 into "networks" (connected components) for the console's cluster view.
 
-Each purchase entry is {"at": iso_timestamp, "platform": "zepto"|"blinkit"|
-"instamart"} — the platform tag is what will eventually drive a cross-store
+Each purchase entry is {"at": iso_timestamp, "platform": "zepto"|"blinkit"}
+— the platform tag is what will eventually drive a cross-store
 price-comparison view (same item cluster, prices from each platform it's
 been bought on). Entries recorded before this field existed are plain ISO
 strings; _ts/_platform below read both shapes so old history doesn't need a

@@ -11,12 +11,8 @@ this version opens a visible browser window and instead polls for a marker
 file — written by whoever triggered the capture once you've logged in —
 before saving the session and exiting.
 
-Works for any platform in tools._session.PLATFORMS (Zepto, Blinkit, Swiggy
-Instamart) — this flow is just "open the URL, let the user log in, keep the
-profile," which doesn't depend on that platform's shopping tools existing
-yet. Blinkit/Instamart tool support (search, cart, checkout) is a separate,
-not-yet-done piece; capturing a session for them just means you're ready
-for when it lands.
+Works for any platform in tools._session.PLATFORMS (Zepto, Blinkit) — this
+flow is just "open the URL, let the user log in, keep the profile."
 
 Usage:
     python scripts/capture_session.py [platform]   # platform defaults to zepto
@@ -66,8 +62,7 @@ def main() -> None:
             # Same stealth flags as tools._session.get_page() — without
             # these, Playwright's automation fingerprint (navigator.webdriver,
             # the AutomationControlled feature) is easy for a site's bot
-            # detection to catch. Swiggy Instamart's did, blocking the very
-            # first request; Zepto/Blinkit happened not to check as hard.
+            # detection to catch.
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
             **CONTEXT_ARGS,
         )
