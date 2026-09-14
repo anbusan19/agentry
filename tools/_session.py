@@ -22,12 +22,16 @@ out and exercised against the live site with stable data-testid selectors.
 Blinkit's was worked out and confirmed live separately (own selectors —
 div[role="button"][id] product cards, a glyph-based quantity stepper, a
 directly-navigable /cart page — see scrape_blinkit_results and
-stepper_click below). check_wallet_balance and manage_address on Blinkit
-are still unconfirmed (the wallet page loaded but never rendered a balance
-in testing — inconclusive, not "broken"), and incrementing the quantity of
-an item already in the cart is flaky. Run scripts/capture_session.py for a
-platform, then try search_products / view_cart there before ever calling
-checkout(confirm=True) on it.
+stepper_click below). manage_address on Blinkit is still unconfirmed.
+Blinkit Money is confirmed app-exclusive — not on /account, not on the web
+payment-method screen (screenshot-confirmed: Wallets, cards, Netbanking,
+UPI, Cash, Pay Later only) — so check_wallet_balance.py reports it
+"not_found" outright for Blinkit rather than hunting for it, and
+checkout.py's payment_method="upi" is the real working payment path there
+instead of a wallet. Incrementing the quantity of an item already in the
+cart is flaky. Run scripts/capture_session.py for a platform, then try
+search_products /
+view_cart there before ever calling checkout(confirm=True) on it.
 """
 
 import concurrent.futures

@@ -92,5 +92,9 @@ def extract_checkout(messages: list[dict[str, Any]]) -> Optional[dict]:
     data = last_tool_result(messages, "checkout")
     if not data or not data.get("status"):
         return None
-    keep = ("status", "amount_paid", "order_id", "note", "error")
+    # qr_image_path/amount_due cover Blinkit's "awaiting_manual_payment"
+    # result (see tools/checkout.py) — without them the console/voice
+    # bridge would silently drop the one piece of that result a human
+    # actually needs (the QR code) and show nothing.
+    keep = ("status", "amount_paid", "order_id", "note", "error", "qr_image_path", "amount_due")
     return {k: data[k] for k in keep if data.get(k) is not None}

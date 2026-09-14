@@ -1,5 +1,11 @@
 "use client";
 
+// Matches every other component's convention (ChatPanel, KnowledgeGraph,
+// SettingsModal, VoiceMode) for reaching the FastAPI bridge — needed here
+// because qr_image_path is served by that backend (GET /api/qr/<file>),
+// not by the Next.js dev server the browser is actually loaded from.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 export interface Cart {
   items: { name: string; quantity: number; price: string | null }[];
   total: string | null;
@@ -11,6 +17,12 @@ export interface CheckoutInfo {
   order_id?: string | null;
   note?: string | null;
   error?: string | null;
+  // Blinkit's payment_method="upi" path (tools/checkout.py): Blinkit Money
+  // is app-exclusive, so this is a live QR code the user scans themselves
+  // rather than a completed payment. qr_image_path is a local filesystem
+  // path from the tool result — served over HTTP via GET /api/qr/<file>.
+  qr_image_path?: string | null;
+  amount_due?: number | null;
 }
 
 /**
@@ -59,11 +71,34 @@ export default function PaymentCard({
     );
   }
 
+  if (checkout && checkout.status === "awaiting_manual_payment" && checkout.qr_image_path) {
+    const filename = checkout.qr_image_path.split("/").pop();
+    return (
+      <div className={`${cls} paycard--pending`}>
+        <div className="paycard__badge paycard__badge--warn">Scan to pay</div>
+        <p className="paycard__meta">
+          Blinkit Money isn&rsquo;t available on the web, so this is a live UPI QR code &mdash;
+          scan it with your banking app to pay.
+        </p>
+        {checkout.amount_due != null && <p className="paycard__amount">₹{checkout.amount_due}</p>}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`${API_BASE}/api/qr/${filename}`}
+          alt="Blinkit UPI payment QR code"
+          className="paycard__qr"
+        />
+        <p className="paycard__meta">This code is time-limited. The order isn&rsquo;t placed until you pay.</p>
+      </div>
+    );
+  }
+
   if (checkout && checkout.status !== "paid") {
     const msg =
       checkout.error ||
       checkout.note ||
-      (checkout.status === "wallet_not_available"
+      (checkout.status === "insufficient_balance"
+        ? "No wallet balance available to pay from — the order was not placed."
+        : checkout.status === "wallet_not_available"
         ? "No platform wallet option was available at checkout — the order was not placed."
         : "Checkout did not complete.");
     return (
