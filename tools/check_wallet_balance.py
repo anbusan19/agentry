@@ -40,6 +40,7 @@ import re
 
 from strands import tool
 
+from tools import _dry_run
 from tools._session import PLATFORMS, get_page, run_on_playwright_thread
 
 _BALANCE_RE = re.compile(
@@ -68,6 +69,8 @@ def check_wallet_balance(platform: str = "zepto") -> dict:
         success, "wallet" (e.g. "Zepto Cash & Gift Card") and "balance"
         (float).
     """
+    if _dry_run.is_dry_run():
+        return _dry_run.check_wallet_balance()
     return run_on_playwright_thread(_check_wallet_balance_impl, platform)
 
 

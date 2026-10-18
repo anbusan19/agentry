@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 from strands import tool
 
+from tools import _dry_run
 from tools._session import PLATFORMS, get_page, js_click, run_on_playwright_thread, scrape_blinkit_results, stepper_click
 
 _NAME_PRICE_RE = re.compile(r"([^\n]+)\n\nNet quantity[^\n]*\n\n₹\s*\n?\s*([\d,.]+)")
@@ -112,6 +113,8 @@ def add_to_cart(product_url: str = "", query: str = "", quantity: int = 1, platf
         A dict with status ("ok", "not_found", or "error"), and on success
         the item's "name", "price" (per unit), and "quantity" now in cart.
     """
+    if _dry_run.is_dry_run():
+        return _dry_run.add_to_cart(product_url, query, quantity, platform)
     return run_on_playwright_thread(_add_to_cart_impl, product_url, query, quantity, platform)
 
 

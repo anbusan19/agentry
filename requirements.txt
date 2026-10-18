@@ -20,8 +20,11 @@ requests==2.32.3
 # Env var loading
 python-dotenv==1.0.1
 
-# Purchase-history knowledge graph (restock timing, co-purchase patterns)
-networkx==3.4.2
+# Purchase-history knowledge graph (restock timing, co-purchase patterns,
+# substitutes, episodic memory) — FalkorDB is the primary datastore for
+# Graph Hacks; there is no local/NetworkX fallback. Run via:
+#   docker run -d --name falkordb -p 6379:6379 falkordb/falkordb
+falkordb==1.5.1
 
 # Web console bridge (server.py) — bridges the chat UI in web/ to a live
 # Agent instance; not part of the core CLI path (main.py)

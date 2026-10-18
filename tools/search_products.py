@@ -29,6 +29,7 @@ from urllib.parse import quote
 
 from strands import tool
 
+from tools import _dry_run
 from tools._session import PLATFORMS, get_page, run_on_playwright_thread, scrape_blinkit_results
 
 _RESULTS_JS = r"""(max) => {
@@ -83,6 +84,8 @@ def search_products(query: str, limit: int = 5, platform: str = "zepto") -> dict
         first. "image" is a product photo URL, or an empty string if the
         card had none.
     """
+    if _dry_run.is_dry_run():
+        return _dry_run.search(query, limit)
     return run_on_playwright_thread(_search_products_impl, query, limit, platform)
 
 

@@ -67,6 +67,7 @@ from typing import Optional
 from strands import tool
 
 from knowledge.budget import record_spend
+from tools import _dry_run
 from tools._session import PLATFORMS, get_page, js_click, run_on_playwright_thread
 
 _WALLET_PATTERN = r"zepto cash|zepto wallet|wallet balance|platform cash|gift card"
@@ -114,6 +115,16 @@ def checkout(confirm: bool = False, platform: str = "zepto", payment_method: str
         "awaiting_manual_payment" carries "qr_image_path" (a local PNG to
         send to the user) and "amount_due".
     """
+    if not confirm:
+        return {
+            "status": "not_confirmed",
+            "note": "checkout requires confirm=True — nothing was done.",
+        }
+    if _dry_run.is_dry_run():
+        result = _dry_run.checkout(platform)
+        if result.get("status") == "paid" and result.get("amount_paid") is not None:
+            record_spend(result["amount_paid"])
+        return result
     return run_on_playwright_thread(_checkout_impl, confirm, platform, payment_method)
 
 

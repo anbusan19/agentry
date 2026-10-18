@@ -21,10 +21,13 @@ from tools.add_to_cart import add_to_cart
 from tools.check_budget import check_budget
 from tools.check_wallet_balance import check_wallet_balance
 from tools.checkout import checkout
+from tools.explain_suggestion import explain_suggestion
 from tools.get_restock_suggestions import get_restock_suggestions
 from tools.manage_address import manage_address
 from tools.notify import notify_user
 from tools.query_purchase_history import query_purchase_history
+from tools.rank_anchor_items import rank_anchor_items
+from tools.recall_decisions import recall_decisions
 from tools.record_purchase import record_purchase
 from tools.remove_from_cart import remove_from_cart
 from tools.search_products import search_products
@@ -45,6 +48,9 @@ DEFAULT_CONVERSATION_WINDOW_SIZE = 30
 # list risks the two silently drifting apart as tools are added.
 AGENTRY_TOOLS = [
     get_restock_suggestions,
+    rank_anchor_items,
+    explain_suggestion,
+    recall_decisions,
     query_purchase_history,
     search_products,
     add_to_cart,

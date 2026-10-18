@@ -31,6 +31,7 @@ import re
 
 from strands import tool
 
+from tools import _dry_run
 from tools._session import PLATFORMS, get_page, run_on_playwright_thread
 
 _WEIGHT_RE = re.compile(r"^\d+\s*(pack|pc|pcs)\b.*\(", re.IGNORECASE)
@@ -119,6 +120,8 @@ def view_cart(platform: str = "zepto") -> dict:
         {name, quantity, price}), and "total" (the amount payable, e.g.
         "₹83" — this already reflects delivery/handling fees and discounts).
     """
+    if _dry_run.is_dry_run():
+        return _dry_run.view_cart(platform)
     return run_on_playwright_thread(_view_cart_impl, platform)
 
 

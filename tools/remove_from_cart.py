@@ -29,6 +29,7 @@ import re
 
 from strands import tool
 
+from tools import _dry_run
 from tools._session import PLATFORMS, get_page, run_on_playwright_thread, stepper_click
 
 
@@ -52,6 +53,8 @@ def remove_from_cart(product_url: str, quantity: int = 0, platform: str = "zepto
         "cleared" from the cart. Call view_cart afterwards to confirm the
         cart's new contents/total.
     """
+    if _dry_run.is_dry_run():
+        return _dry_run.remove_from_cart(product_url, quantity, platform)
     return run_on_playwright_thread(_remove_from_cart_impl, product_url, quantity, platform)
 
 
