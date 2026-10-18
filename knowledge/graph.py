@@ -208,7 +208,7 @@ def record_purchase(
             g.query(
                 """
                 MATCH (pa:Product {sku: $lo}), (pb:Product {sku: $hi})
-                MERGE (pa)-[r:CO_PURCHASED_WITH]-(pb)
+                MERGE (pa)-[r:CO_PURCHASED_WITH]->(pb)
                 ON CREATE SET r.count = 1, r.last_ts = $ts
                 ON MATCH SET r.count = r.count + 1, r.last_ts = $ts
                 """,
@@ -332,15 +332,18 @@ def co_purchase_suggestions(seed_skus: list[str], limit: int = 5, user_id: Optio
     seeds = [_normalize(s) for s in seed_skus]
     g = graph_for(user_id)
 
+    # LIMIT is interpolated as a plain int literal, not a $param — FalkorDB's
+    # Cypher dialect doesn't reliably accept a parameterized LIMIT. `limit`
+    # is always a caller-supplied int (never raw user text), so this is safe.
     co_rows = g.query(
-        """
+        f"""
         UNWIND $seeds AS seed
-        MATCH (s:Product {sku: seed})-[r:CO_PURCHASED_WITH]-(p:Product)
+        MATCH (s:Product {{sku: seed}})-[r:CO_PURCHASED_WITH]-(p:Product)
         WHERE NOT p.sku IN $seeds
         RETURN p.sku, p.name, sum(r.count) AS score
-        ORDER BY score DESC LIMIT $limit
+        ORDER BY score DESC LIMIT {int(limit)}
         """,
-        {"seeds": seeds, "limit": limit},
+        {"seeds": seeds},
     ).result_set
 
     scores: dict[str, dict] = {
@@ -349,14 +352,14 @@ def co_purchase_suggestions(seed_skus: list[str], limit: int = 5, user_id: Optio
 
     if len(scores) < limit:
         cat_rows = g.query(
-            """
+            f"""
             UNWIND $seeds AS seed
-            MATCH (s:Product {sku: seed})-[:IN_CATEGORY]->(c:Category)<-[:IN_CATEGORY]-(p:Product)
+            MATCH (s:Product {{sku: seed}})-[:IN_CATEGORY]->(c:Category)<-[:IN_CATEGORY]-(p:Product)
             WHERE NOT p.sku IN $seeds AND NOT p.sku IN $existing
             RETURN p.sku, p.name, count(*) AS score
-            ORDER BY score DESC LIMIT $limit
+            ORDER BY score DESC LIMIT {int(limit) - len(scores)}
             """,
-            {"seeds": seeds, "existing": list(scores), "limit": limit - len(scores)},
+            {"seeds": seeds, "existing": list(scores)},
         ).result_set
         for sku, name, score in cat_rows:
             scores[sku] = {"sku": sku, "name": name, "score": float(score) * 0.5, "via": "same_category"}
@@ -498,9 +501,12 @@ def rank_anchor_items(limit: int = 10, user_id: Optional[str] = None) -> dict:
     the ones most central to its co-purchase network, not just the
     most-frequently-bought in isolation."""
     g = graph_for(user_id)
-    cypher = "CALL algo.pageRank('Product', 'CO_PURCHASED_WITH') YIELD node, score RETURN node.sku, score ORDER BY score DESC LIMIT $limit"
+    cypher = (
+        "CALL algo.pageRank('Product', 'CO_PURCHASED_WITH') YIELD node, score "
+        f"RETURN node.sku, score ORDER BY score DESC LIMIT {int(limit)}"
+    )
     try:
-        rows = g.query(cypher, {"limit": limit}).result_set
+        rows = g.query(cypher).result_set
     except Exception as exc:
         return {"anchors": [], "cypher": cypher, "error": str(exc)}
     return {"anchors": [{"sku": sku, "score": round(score, 4)} for sku, score in rows], "cypher": cypher}
@@ -516,6 +522,18 @@ def graph_snapshot(within_days: float = 3.0, user_id: Optional[str] = None, max_
     node_rows = g.query(
         "MATCH (p:Product) RETURN p.sku, p.purchase_count, p.last_purchased_ts, p.category"
     ).result_set
+
+    platform_rows = g.query(
+        "MATCH (:User)-[r:PURCHASED]->(p:Product) RETURN p.sku, r.platform, count(*) AS n"
+    ).result_set
+    platforms_by_sku: dict[str, list[tuple[str, int]]] = {}
+    for sku, platform, n in platform_rows:
+        platforms_by_sku.setdefault(sku, []).append((platform or "zepto", n))
+
+    def _ranked_platforms(sku: str) -> list[str]:
+        counts = sorted(platforms_by_sku.get(sku, []), key=lambda pair: pair[1], reverse=True)
+        return [p for p, _ in counts]
+
     nodes = [
         {
             "id": sku,
@@ -523,7 +541,7 @@ def graph_snapshot(within_days: float = 3.0, user_id: Optional[str] = None, max_
             "last_purchased": last_ts,
             "overdue": due_by_sku.get(sku, {}).get("overdue", False),
             "due_soon": sku in due_by_sku,
-            "platforms": [],
+            "platforms": _ranked_platforms(sku),
             "category": category,
         }
         for sku, count, last_ts, category in node_rows

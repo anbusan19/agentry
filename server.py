@@ -17,13 +17,10 @@ Run: uvicorn server:app --reload --port 8000
 """
 
 import base64
-import json
 import os
 import re
-from collections import Counter
 from typing import Any, Optional
 
-import networkx as nx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket
 from fastapi.concurrency import run_in_threadpool
@@ -36,7 +33,7 @@ from agent.turn_extract import extract_cart as _extract_cart
 from agent.turn_extract import extract_checkout as _extract_checkout
 from agent.turn_extract import extract_search_batches as _extract_search_batches
 from knowledge.budget import spent_within
-from knowledge.graph import last_purchased, load_graph, node_platforms, restock_suggestions
+from knowledge.graph import explain_path, graph_for, graph_snapshot
 from knowledge.settings import get_settings, update_settings
 from tools._session import platform_status
 from tools.checkout import QR_DIR
@@ -404,49 +401,22 @@ async def qr_image(filename: str):
 
 
 @app.get("/api/graph")
-async def graph():
-    """The purchase-history knowledge graph, shaped for a force-directed
-    viz: nodes carry restock status and which storefront(s) they were
-    bought on, edges carry co-purchase weight, and clusters group the
-    connected "networks" of related items (>= 2 items, sharing a
-    co-purchase edge) with the platform(s) behind them — a first step
-    toward showing a per-cluster price comparison across storefronts once
-    more than one is wired up."""
-    g = load_graph()
-    due_by_item = {d["item"]: d for d in restock_suggestions()["due"]}
+async def graph(user_id: Optional[str] = None):
+    """The purchase-history knowledge graph, read live from FalkorDB and
+    shaped for a force-directed viz: nodes carry restock status, edges
+    carry co-purchase weight, and clusters group the connected "networks"
+    of related items (>= 2 items, sharing a co-purchase edge). This is the
+    graph the agent itself reasons over — not a separate cache — so the
+    console's visual is always driven by FalkorDB directly."""
+    return graph_snapshot(user_id=user_id)
 
-    nodes = [
-        {
-            "id": item,
-            "purchase_count": len(attrs.get("purchases", [])),
-            "last_purchased": last_purchased(attrs),
-            "overdue": due_by_item.get(item, {}).get("overdue", False),
-            "due_soon": item in due_by_item,
-            "platforms": node_platforms(attrs),
-        }
-        for item, attrs in g.nodes(data=True)
-    ]
-    links = [
-        {"source": a, "target": b, "weight": attrs.get("co_purchase", 1)}
-        for a, b, attrs in g.edges(data=True)
-    ]
 
-    clusters = []
-    for i, component in enumerate(nx.connected_components(g)):
-        if len(component) < 2:
-            continue  # an isolated item isn't a "network" to label
-        platform_counts: Counter[str] = Counter()
-        for item in component:
-            platform_counts.update(node_platforms(g.nodes[item]))
-        clusters.append(
-            {
-                "id": i,
-                "items": sorted(component),
-                "platforms": [p for p, _ in platform_counts.most_common()],
-            }
-        )
-
-    return {"nodes": nodes, "links": links, "clusters": clusters}
+@app.get("/api/explain")
+async def explain(sku: str, user_id: Optional[str] = None):
+    """The traceable reasoning (and exact Cypher) behind a suggestion for
+    one item — the same data tools/explain_suggestion.py hands the agent,
+    exposed here so the console can show/highlight it directly."""
+    return explain_path(sku, user_id=user_id)
 
 
 # Bedrock Mantle has no equivalent to Gemini's models.list() readily
@@ -471,7 +441,9 @@ class SettingsPatch(BaseModel):
 
 def _settings_payload() -> dict:
     settings = get_settings()
-    g = load_graph()
+    g = graph_for()
+    product_count = g.query("MATCH (p:Product) RETURN count(p)").result_set[0][0]
+    edge_count = g.query("MATCH ()-[r:CO_PURCHASED_WITH]-() RETURN count(r)").result_set[0][0] // 2
     return {
         "weekly_budget_inr": settings["weekly_budget_inr"],
         "spent_this_week": round(spent_within(7), 2),
@@ -493,7 +465,7 @@ def _settings_payload() -> dict:
             os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
         ),
         "platforms": platform_status(),
-        "graph_stats": {"items": g.number_of_nodes(), "co_purchase_links": g.number_of_edges()},
+        "graph_stats": {"items": product_count, "co_purchase_links": edge_count},
     }
 
 

@@ -128,7 +128,7 @@ def _seed_substitutes_and_decisions(user_id: str, now: datetime) -> dict:
                   pa.purchase_count = 0, pa.interval_sum_days = 0.0
             MERGE (pb:Product {sku: $b}) ON CREATE SET pb.name = $b, pb.category = 'uncategorized',
                   pb.purchase_count = 0, pb.interval_sum_days = 0.0
-            MERGE (pa)-[e:SUBSTITUTE_FOR {reason: $reason}]-(pb)
+            MERGE (pa)-[e:SUBSTITUTE_FOR {reason: $reason}]->(pb)
             """,
             {"a": a, "b": b, "reason": reason},
         )
